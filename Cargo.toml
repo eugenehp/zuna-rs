@@ -1,0 +1,112 @@
+[package]
+name = "zuna-rs"
+version = "0.0.1"
+edition = "2021"
+description = "ZUNA EEG Foundation Model — inference in Rust with Burn ML"
+keywords      = ["exg", "foundational", "BCI", "GPU", "CPU"]
+authors       = ["Eugene Hauptmann"]
+license-file  = "LICENSE"
+homepage      = "https://github.com/eugenehp/zuna-rs"
+repository    = "https://github.com/eugenehp/zuna-rs"
+documentation = "https://docs.rs/zuna-rs"
+
+[lib]
+name = "zuna_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "infer"
+path = "src/bin/infer.rs"
+
+# ── Examples ──────────────────────────────────────────────────────────────────
+# Run with: cargo run --example <name> --release -- [args]
+# GPU variant: cargo run --example <name> --release \
+#                --no-default-features --features wgpu -- --device gpu
+
+[[example]]
+name = "infer"
+path = "examples/infer.rs"
+# default features (ndarray CPU) are sufficient; add wgpu for --device gpu
+
+[[example]]
+name = "embed"
+path = "examples/embed.rs"
+# default features (ndarray CPU) are sufficient; add wgpu for --device gpu
+
+[[example]]
+name = "embedding_api"
+path = "examples/embedding_api.rs"
+# Minimal embedding API showcase — no CLI flags needed, runs on CPU by default.
+# GPU: cargo run --example embedding_api --release \
+#        --no-default-features --features wgpu
+
+[[bin]]
+name = "download_weights"
+path = "src/bin/download_weights.rs"
+required-features = ["hf-download"]
+
+[features]
+default = ["ndarray"]
+# CPU backend — Rayon multi-threading + SIMD enabled by default
+ndarray         = ["dep:burn-ndarray", "burn/ndarray"]
+# macOS: swap matmul impl to Apple Accelerate (multi-threaded, free, very fast on Apple Silicon)
+blas-accelerate = ["burn-ndarray?/blas-accelerate"]
+# Linux: use system OpenBLAS (apk add openblas-dev)
+openblas-system = ["burn-ndarray?/blas-openblas-system"]
+# GPU backend — wgpu on Metal (macOS) or Vulkan (Linux with GPU)
+wgpu            = ["burn/wgpu"]
+# HuggingFace Hub downloader — requires TLS; disable on musl/Alpine (no static openssl)
+hf-download     = ["dep:hf-hub"]
+
+[dependencies]
+burn = { version = "0.20.1", default-features = false, features = ["std", "simd"] }
+# Direct dep so we can opt-in to multi-threads + simd that burn strips via default-features=false
+burn-ndarray = { version = "0.20.1", default-features = false, features = ["std", "simd", "multi-threads"], optional = true }
+
+# EEG preprocessing (FIF reader + full pipeline in pure Rust).
+exg = { git = "https://github.com/eugenehp/exg", tag = "0.0.1" }
+
+# ndarray — used to pass Array2<f32> between exg and Burn tensors.
+ndarray = "0.17"
+
+# Read HuggingFace safetensors weight files and I/O batches.
+safetensors = "0.7"
+
+# bf16 byte conversion for weight loading.
+half = { version = "2", features = ["bytemuck"] }
+
+
+# CLI argument parsing.
+clap = { version = "4", features = ["derive", "env"] }
+
+# JSON for loading config.json from HuggingFace.
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling.
+anyhow = "1.0.102"
+
+# HuggingFace Hub client — optional; only compiled with --features hf-download.
+# Uses ureq (pure-Rust TLS via rustls). Not available on musl Alpine (no static openssl).
+hf-hub = { version = "0.5", default-features = false, features = ["ureq"], optional = true }
+
+[dev-dependencies]
+# Chart generation in examples
+plotters = { version = "0.3", default-features = false, features = [
+    "bitmap_backend", "bitmap_encoder",
+    "ttf",
+    "line_series", "area_series", "full_palette",
+] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1   # single codegen unit for better inter-proc optimisation
+
+# ── Patch cubek-matmul to add graceful fallback on Apple Silicon ──────────────
+# The published 0.1.1 panics when the SimpleCyclicCmma tile (40 KB shared mem)
+# exceeds Apple Silicon Metal's 32 KB limit.  Our local copy extends the `auto`
+# fallback chain: SimpleCyclicCmma → SimpleUnit → Naive.
+[patch.crates-io]
+# cubek-matmul = { path = "../vendor/cubek-matmul" }
+cubek-matmul = { git = "https://github.com/eugenehp/cubek.git", branch = "cubek-matmul", package = "cubek-matmul" }

@@ -1,0 +1,90 @@
+{
+  "platform": {
+    "os": "Darwin",
+    "os_version": "Darwin Kernel Version 25.3.0: Wed Jan 28 20:47:03 PST 2026; root:xnu-12377.81.4~5/RELEASE_ARM64_T6031",
+    "os_release": "25.3.0",
+    "arch": "arm64",
+    "python_version": "3.12.2",
+    "device_type": "gpu",
+    "cpu_model": "Apple M3 Max",
+    "cpu_cores_physical": 16,
+    "cpu_cores_logical": 16,
+    "ram_gb": 48.0,
+    "gpu_model": "Apple M3 Max (integrated GPU / Metal)",
+    "gpu_vram_gb": 48.0,
+    "estimated_tflops": 14.2,
+    "slug": "gpu_apple_m3_max"
+  },
+  "rust_timings": [
+    {
+      "weights_ms": 410.7,
+      "preproc_ms": 4.6,
+      "encode_ms": 958.7,
+      "total_ms": 1389.2
+    },
+    {
+      "weights_ms": 417.9,
+      "preproc_ms": 4.8,
+      "encode_ms": 950.2,
+      "total_ms": 1382.7
+    },
+    {
+      "weights_ms": 408.9,
+      "preproc_ms": 4.8,
+      "encode_ms": 949.5,
+      "total_ms": 1373.0
+    }
+  ],
+  "n_runs": 3,
+  "python_comparison": {
+    "ms_weights_load_py": 244.3771249963902,
+    "ms_encode_py_per_epoch": 695.0995969915917,
+    "epochs": [
+      {
+        "epoch": 0,
+        "n_tokens": 480,
+        "n_dims": 32,
+        "mae": 8.364850809942463e-07,
+        "rmse": 1.0510849017282511e-06,
+        "max_err": 5.066394805908203e-06,
+        "pearson_r": 0.9999999999992459,
+        "rel_err": 1.2142381111085797e-06,
+        "py_ms": 702.313707995927
+      },
+      {
+        "epoch": 1,
+        "n_tokens": 480,
+        "n_dims": 32,
+        "mae": 8.484422667246842e-07,
+        "rmse": 1.0695005272468917e-06,
+        "max_err": 4.5299530029296875e-06,
+        "pearson_r": 0.9999999999992312,
+        "rel_err": 1.2187681636768313e-06,
+        "py_ms": 705.1518329826649
+      },
+      {
+        "epoch": 2,
+        "n_tokens": 480,
+        "n_dims": 32,
+        "mae": 8.513761542872089e-07,
+        "rmse": 1.0720096855516113e-06,
+        "max_err": 4.291534423828125e-06,
+        "pearson_r": 0.9999999999992311,
+        "rel_err": 1.2225687331903863e-06,
+        "py_ms": 677.8332499961834
+      }
+    ],
+    "summary": {
+      "mae": 8.454345006687131e-07,
+      "rmse": 1.064198371508918e-06,
+      "max_err": 4.629294077555339e-06,
+      "pearson_r": 0.9999999999992362,
+      "rel_err": 1.2185250026585992e-06
+    }
+  },
+  "embedding_stats": {
+    "mean": 0.04495850205421448,
+    "std": 0.8600736856460571,
+    "n_dims": 32
+  }
+}

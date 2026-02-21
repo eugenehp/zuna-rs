@@ -1,0 +1,90 @@
+{
+  "platform": {
+    "os": "Linux",
+    "os_version": "#1 SMP Mon Jan 26 23:07:00 UTC 2026",
+    "os_release": "6.12.67-linuxkit",
+    "arch": "aarch64",
+    "python_version": "3.12.12",
+    "device_type": "cpu",
+    "cpu_model": "unknown",
+    "cpu_cores_physical": null,
+    "cpu_cores_logical": 16,
+    "ram_gb": 7.7,
+    "gpu_model": null,
+    "gpu_vram_gb": null,
+    "estimated_tflops": null,
+    "slug": "cpu_unknown"
+  },
+  "rust_timings": [
+    {
+      "weights_ms": 1722.9,
+      "preproc_ms": 5.1,
+      "encode_ms": 9230.1,
+      "total_ms": 10964.2
+    },
+    {
+      "weights_ms": 1718.3,
+      "preproc_ms": 5.6,
+      "encode_ms": 9769.6,
+      "total_ms": 11493.9
+    },
+    {
+      "weights_ms": 1713.2,
+      "preproc_ms": 5.2,
+      "encode_ms": 9412.8,
+      "total_ms": 11131.5
+    }
+  ],
+  "n_runs": 3,
+  "python_comparison": {
+    "ms_weights_load_py": 349.96662598859984,
+    "ms_encode_py_per_epoch": 1952.1635283357075,
+    "epochs": [
+      {
+        "epoch": 0,
+        "n_tokens": 480,
+        "n_dims": 32,
+        "mae": 2.3376705939881504e-07,
+        "rmse": 3.0210107659482965e-07,
+        "max_err": 1.6689300537109375e-06,
+        "pearson_r": 0.9999999999999379,
+        "rel_err": 3.3933524828254143e-07,
+        "py_ms": 2055.8112500002608
+      },
+      {
+        "epoch": 1,
+        "n_tokens": 480,
+        "n_dims": 32,
+        "mae": 2.4288669919769745e-07,
+        "rmse": 3.1470537752976305e-07,
+        "max_err": 1.6689300537109375e-06,
+        "pearson_r": 0.9999999999999328,
+        "rel_err": 3.4890117092879086e-07,
+        "py_ms": 2020.6002089980757
+      },
+      {
+        "epoch": 2,
+        "n_tokens": 480,
+        "n_dims": 32,
+        "mae": 2.396241332765688e-07,
+        "rmse": 3.1082278472489266e-07,
+        "max_err": 2.1457672119140625e-06,
+        "pearson_r": 0.999999999999936,
+        "rel_err": 3.4409816575970356e-07,
+        "py_ms": 1780.0791260087863
+      }
+    ],
+    "summary": {
+      "mae": 2.387592972910271e-07,
+      "rmse": 3.0920974628316177e-07,
+      "max_err": 1.8278757731119792e-06,
+      "pearson_r": 0.9999999999999356,
+      "rel_err": 3.4411152832367867e-07
+    }
+  },
+  "embedding_stats": {
+    "mean": 0.04495849087834358,
+    "std": 0.8600736856460571,
+    "n_dims": 32
+  }
+}
