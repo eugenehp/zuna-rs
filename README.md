@@ -214,6 +214,171 @@ sh zuna-rs/benchmark.sh --no-python  # skip NumPy encoder comparison
 sh zuna-rs/benchmark.sh --cached     # skip build if binary exists
 ```
 
+### Example output
+
+<details>
+
+<summary>Show more</summary>
+
+```shell
+./benchmark.sh
+
+━━━  ZUNA benchmark  —  wgpu / Metal (macOS GPU)
+  runs=3  full=0  cached=0  threads=16
+  ✓  Python : Python 3.9.6  (/github/venv/bin/python3)
+
+━━━  [1/4] Build
+  cargo build --release --no-default-features --features wgpu --example embed
+    Finished `release` profile [optimized] target(s) in 0.13s
+  ✓  embed  →  /tmp/zuna-bench-embed
+
+━━━  [2/4] Weights
+  Scanning HuggingFace cache …
+  ✓  weights : /Users/user/.cache/huggingface/hub/models--Zyphra--ZUNA/snapshots/local/model-00001-of-00001.safetensors
+  ✓  config  : /Users/user/.cache/huggingface/hub/models--Zyphra--ZUNA/snapshots/local/config.json
+
+━━━  [3/4] Encoder benchmark  (embed example)
+  ✓  FIF     : /github/zuna-rs/data/sample1_raw.fif
+  Running embed example  (device=gpu, 3 pass(es)) …
+  
+Backend  : GPU (wgpu)
+FIF      : /github/zuna-rs/data/sample1_raw.fif
+
+[  0.00s] ▶ [1/7] Resolve weights
+[  0.00s] ✓  0 ms  weights=model-00001-of-00001.safetensors  config=config.json
+
+[  0.00s] ▶ [2/7] Load encoder
+Detected n_heads = 8
+[  0.42s] ✓  423 ms  ZUNA encoder  dim=1024  layers=16  head_dim=64  out_dim=32
+
+[  0.42s] ▶ [3/7] Preprocess FIF
+[  0.43s] ✓  5 ms  5.2 ms  3 epochs  channels=12  tokens/ep=480  sfreq=256→256 Hz  dur=15.00s
+[  0.43s]     channels: Fp1, Fp2, F3, F4, C3, C4, P3, P4, O1, O2, F7, F8
+
+[  0.43s] ▶ [4/7] Encode (encoder forward pass)
+[  1.38s] ✓  955 ms  954.8 ms  3 epochs  tokens×dims = 480×32  input_dim=32
+[  1.38s]     epoch 0: tokens=480 dims=32  mean=+0.0388  std=0.8546  [-2.902,+3.426]
+[  1.38s]     epoch 1: tokens=480 dims=32  mean=+0.0499  std=0.8615  [-3.220,+3.507]
+[  1.38s]     epoch 2: tokens=480 dims=32  mean=+0.0463  std=0.8641  [-3.021,+3.035]
+
+[  1.38s] ▶ [5/7] Save embeddings
+[  1.38s] ✓  0 ms  → /tmp/zuna_bench_embeddings.safetensors
+
+[  1.38s] ▶ [6/7] Export encoder inputs (for bench_and_visualize.py)
+[  1.39s] ✓  5 ms  → /tmp/zuna_bench_inputs.safetensors  (3 epochs)
+
+[  1.39s] ▶ [7/7] Generate charts
+[  1.39s]     MMD check — dim-avg mean=+0.0450  dim-avg std=0.7802  (ideal: 0.0 and 1.0)
+  chart → /github/zuna-rs/figures/embed_timing.png
+  chart → /github/zuna-rs/figures/embed_distribution.png
+  chart → /github/zuna-rs/figures/embed_dim_stats.png
+[  1.40s] ✓  10 ms  charts → /github/zuna-rs/figures/
+
+── Summary ────────────────────────────────────────────────
+  Weights  : 411 ms
+  Preproc  : 5.2 ms
+  Encode   : 954.8 ms  (3 epochs)
+  Total    : 1398 ms
+  Output   : /tmp/zuna_bench_embeddings.safetensors
+  Emb dim  : 480 × 32 = 15360 values/epoch
+TIMING weights=410.5ms preproc=5.2ms encode=954.8ms total=1397.9ms
+  
+  Timing pass 2/3 …
+[1/5] Resolve weights … 0 ms  weights=model-00001-of-00001.safetensors  config=config.json
+[2/5] Load encoder … Detected n_heads = 8
+[3/5] Preprocess FIF … 5 ms  5.1 ms  3 epochs  channels=12  tokens/ep=480  sfreq=256→256 Hz  dur=15.00s
+[4/5] Encode (encoder forward pass) … 966 ms  966.2 ms  3 epochs  tokens×dims = 480×32  input_dim=32
+[5/5] Save embeddings … 0 ms  → /tmp/zuna_bench_embeddings.safetensors
+TIMING weights=423.2ms preproc=5.1ms encode=966.2ms total=1404.9ms
+  Timing pass 3/3 …
+[1/5] Resolve weights … 0 ms  weights=model-00001-of-00001.safetensors  config=config.json
+[2/5] Load encoder … Detected n_heads = 8
+[3/5] Preprocess FIF … 5 ms  5.5 ms  3 epochs  channels=12  tokens/ep=480  sfreq=256→256 Hz  dur=15.00s
+[4/5] Encode (encoder forward pass) … 963 ms  962.9 ms  3 epochs  tokens×dims = 480×32  input_dim=32
+[5/5] Save embeddings … 0 ms  → /tmp/zuna_bench_embeddings.safetensors
+TIMING weights=436.6ms preproc=5.5ms encode=962.9ms total=1416.1ms
+  ✓  Embeddings  →  /tmp/zuna_bench_embeddings.safetensors
+  ✓  Bench inputs  →  /tmp/zuna_bench_inputs.safetensors
+
+━━━  [4/4] bench_and_visualize.py
+================================================================
+  ZUNA bench_and_visualize.py
+================================================================
+
+▶ Detecting platform …
+  Darwin 25.3.0 · Apple M3 Max · 16 cores · 48.0 GB RAM · GPU: Apple M3 Max (integrated GPU / Metal) · 48.0 GB VRAM · ~14.2 TFLOPS (fp32)
+  slug : gpu_apple_m3_max
+
+▶ Resolving model weights …
+  weights : /Users/user/.cache/huggingface/hub/models--Zyphra--ZUNA/snapshots/local/model-00001-of-00001.safetensors
+  config  : /Users/user/.cache/huggingface/hub/models--Zyphra--ZUNA/snapshots/local/config.json
+
+▶ Running Rust encoder 3× for timing benchmarks …
+  Run 1/3 …  ✓  1408 ms  (weights=424ms  preproc=5ms  encode=962ms)
+  Run 2/3 …  ✓  1406 ms  (weights=428ms  preproc=6ms  encode=961ms)
+  Run 3/3 …  ✓  1388 ms  (weights=419ms  preproc=5ms  encode=953ms)
+
+  Rust embeddings: 3 epoch(s)  n_dims=32  total_values=46080
+  mean=+0.0450  std=0.8601  min=-3.220  max=3.507
+
+▶ Loading weights for Python NumPy encoder …
+  Loaded 463 weight tensors from model-00001-of-00001.safetensors
+  Loaded in 233 ms
+  Running NumPy encoder on 3 epoch(s) …
+  Epoch 0: MAE=8.36e-07  RMSE=1.05e-06  maxErr=5.07e-06  r=1.000000  py=715ms
+  Epoch 1: MAE=8.48e-07  RMSE=1.07e-06  maxErr=4.53e-06  r=1.000000  py=737ms
+  Epoch 2: MAE=8.51e-07  RMSE=1.07e-06  maxErr=4.29e-06  r=1.000000  py=704ms
+
+================================================================
+  RESULTS SUMMARY
+================================================================
+  Platform : Darwin 25.3.0 · Apple M3 Max · 16 cores · 48.0 GB RAM · GPU: Apple M3 Max (integrated GPU / Metal) · 48.0 GB VRAM · ~14.2 TFLOPS (fp32)
+  Rust encoder (3 runs):
+    Weights         423.8 ± 3.9 ms
+    Preprocess        5.2 ± 0.2 ms
+    Encode          958.7 ± 4.1 ms
+    Total          1400.3 ± 9.1 ms
+
+  Python vs Rust precision:
+    MAE        8.45e-07
+    RMSE       1.06e-06
+    Max error  4.63e-06
+    Pearson r  1.000000
+
+  Embedding distribution (Rust):
+    mean=+0.0450  std=0.8601  (ideal: 0.0 and 1.0)
+
+  Data → /github/zuna-rs/scripts/../figures/bench_data_gpu_apple_m3_max.json
+
+▶ Generating charts …
+  chart → /github/zuna-rs/scripts/../figures/bench_speed_gpu_apple_m3_max.png
+  chart → /github/zuna-rs/scripts/../figures/bench_run_consistency_gpu_apple_m3_max.png
+  chart → /github/zuna-rs/scripts/../figures/bench_distribution_gpu_apple_m3_max.png
+  chart → /github/zuna-rs/scripts/../figures/bench_dim_stats_gpu_apple_m3_max.png
+  chart → /github/zuna-rs/scripts/../figures/bench_precision_gpu_apple_m3_max.png
+  chart → /github/zuna-rs/scripts/../figures/bench_py_vs_rust_gpu_apple_m3_max.png
+
+▶ Updating README.md …
+
+✓ bench_and_visualize.py complete.
+  Charts  : /github/zuna-rs/scripts/../figures/
+  Data    : /github/zuna-rs/scripts/../figures/bench_data_gpu_apple_m3_max.json
+  ✓  Charts  →  /github/zuna-rs/figures/
+  ✓  Data    →  /github/zuna-rs/figures/bench_data.json
+
+━━━  Done
+  ✓  Backend : wgpu / Metal (macOS GPU)
+  ✓  Figures : /github/zuna-rs/figures/
+  ✓  README  : /github/zuna-rs/README.md  (benchmark section auto-updated)
+  
+  View figures:
+    ls /github/zuna-rs/figures/*.png
+```
+
+</details>
+
+
+
 On **macOS** builds with `--no-default-features --features wgpu` (Metal GPU).  
 On **Linux** with Vulkan uses wgpu; otherwise falls back to CPU/Rayon.
 

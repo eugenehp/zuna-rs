@@ -17,28 +17,28 @@
   },
   "rust_timings": [
     {
-      "weights_ms": 410.7,
-      "preproc_ms": 4.6,
-      "encode_ms": 958.7,
-      "total_ms": 1389.2
+      "weights_ms": 423.9,
+      "preproc_ms": 5.1,
+      "encode_ms": 962.5,
+      "total_ms": 1407.8
     },
     {
-      "weights_ms": 417.9,
-      "preproc_ms": 4.8,
-      "encode_ms": 950.2,
-      "total_ms": 1382.7
+      "weights_ms": 428.5,
+      "preproc_ms": 5.5,
+      "encode_ms": 960.7,
+      "total_ms": 1405.7
     },
     {
-      "weights_ms": 408.9,
-      "preproc_ms": 4.8,
-      "encode_ms": 949.5,
-      "total_ms": 1373.0
+      "weights_ms": 418.9,
+      "preproc_ms": 4.9,
+      "encode_ms": 953.0,
+      "total_ms": 1387.5
     }
   ],
   "n_runs": 3,
   "python_comparison": {
-    "ms_weights_load_py": 244.3771249963902,
-    "ms_encode_py_per_epoch": 695.0995969915917,
+    "ms_weights_load_py": 233.22154200286604,
+    "ms_encode_py_per_epoch": 718.6836249990544,
     "epochs": [
       {
         "epoch": 0,
@@ -49,7 +49,7 @@
         "max_err": 5.066394805908203e-06,
         "pearson_r": 0.9999999999992459,
         "rel_err": 1.2142381111085797e-06,
-        "py_ms": 702.313707995927
+        "py_ms": 714.9782920023426
       },
       {
         "epoch": 1,
@@ -60,7 +60,7 @@
         "max_err": 4.5299530029296875e-06,
         "pearson_r": 0.9999999999992312,
         "rel_err": 1.2187681636768313e-06,
-        "py_ms": 705.1518329826649
+        "py_ms": 737.4771249887999
       },
       {
         "epoch": 2,
@@ -71,7 +71,7 @@
         "max_err": 4.291534423828125e-06,
         "pearson_r": 0.9999999999992311,
         "rel_err": 1.2225687331903863e-06,
-        "py_ms": 677.8332499961834
+        "py_ms": 703.5954580060206
       }
     ],
     "summary": {

@@ -134,7 +134,7 @@ REPO_ID      = "Zyphra/ZUNA"
 WEIGHTS_FILE = "model-00001-of-00001.safetensors"
 CONFIG_FILE  = "config.json"
 SAMPLE_FIF   = pathlib.Path(__file__).parent / "data" / "sample1_raw.fif"
-FIGURES_DIR  = pathlib.Path(__file__).parent / "figures"
+FIGURES_DIR  = pathlib.Path(__file__).parent / ".." / "figures"
 BENCH_DATA   = FIGURES_DIR / "bench_data.json"
 README_PATH  = pathlib.Path(__file__).parent / "README.md"
 
