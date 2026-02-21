@@ -64,7 +64,7 @@ burn = { version = "0.20.1", default-features = false, features = ["std", "simd"
 burn-ndarray = { version = "0.20.1", default-features = false, features = ["std", "simd", "multi-threads"], optional = true }
 
 # EEG preprocessing (FIF reader + full pipeline in pure Rust).
-exg = { git = "https://github.com/eugenehp/exg", tag = "0.0.1" }
+exg = { git = "https://github.com/eugenehp/exg", tag = "0.0.1", version = "0.0.1"}
 
 # ndarray — used to pass Array2<f32> between exg and Burn tensors.
 ndarray = "0.17"
