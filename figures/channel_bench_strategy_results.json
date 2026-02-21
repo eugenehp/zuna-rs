@@ -1,0 +1,2276 @@
+{
+  "config_names": [
+    "12ch_baseline",
+    "10ch_zero_pad",
+    "10ch_clone_nearest",
+    "10ch_clone_fp1",
+    "10ch_noisy_clone",
+    "10ch_xyz_jitter",
+    "10ch_interp_weighted",
+    "10ch_mirror",
+    "10ch_mean_ref",
+    "10ch_native",
+    "8ch_zero_pad",
+    "8ch_clone_nearest",
+    "8ch_clone_fp1",
+    "8ch_noisy_clone",
+    "8ch_xyz_jitter",
+    "8ch_interp_weighted",
+    "8ch_mirror",
+    "8ch_mean_ref",
+    "8ch_native",
+    "6ch_zero_pad",
+    "6ch_clone_nearest",
+    "6ch_clone_fp1",
+    "6ch_noisy_clone",
+    "6ch_xyz_jitter",
+    "6ch_interp_weighted",
+    "6ch_mirror",
+    "6ch_mean_ref",
+    "6ch_native",
+    "4ch_zero_pad",
+    "4ch_clone_nearest",
+    "4ch_clone_fp1",
+    "4ch_noisy_clone",
+    "4ch_xyz_jitter",
+    "4ch_interp_weighted",
+    "4ch_mirror",
+    "4ch_mean_ref",
+    "4ch_native",
+    "2ch_zero_pad",
+    "2ch_clone_nearest",
+    "2ch_clone_fp1",
+    "2ch_noisy_clone",
+    "2ch_xyz_jitter",
+    "2ch_interp_weighted",
+    "2ch_mirror",
+    "2ch_mean_ref",
+    "2ch_native"
+  ],
+  "configurations": [
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 0,
+      "n_channels_loaded": 12,
+      "n_channels_padded": 0,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "12ch_baseline",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.431206226348877,
+        "mean": 0.05136388064157574,
+        "mean_abs": 0.695837676525116,
+        "min": -3.1662964820861816,
+        "std": 0.862929981215307
+      },
+      "strategy": "zero_pad",
+      "timing_ms": {
+        "encode": 9487.337128,
+        "total": 9492.197544999999
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 1,
+      "n_channels_loaded": 10,
+      "n_channels_padded": 2,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "10ch_zero_pad",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.4972236156463623,
+        "mean": 0.04838971055696422,
+        "mean_abs": 0.694656252861023,
+        "min": -3.224118232727051,
+        "std": 0.8607364139772682
+      },
+      "strategy": "zero_pad",
+      "timing_ms": {
+        "encode": 9322.834379,
+        "total": 9327.607463
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 2,
+      "n_channels_loaded": 10,
+      "n_channels_padded": 2,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "10ch_clone_nearest",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.439469337463379,
+        "mean": 0.05151300459362523,
+        "mean_abs": 0.6932656764984131,
+        "min": -3.2336816787719727,
+        "std": 0.8605597245278716
+      },
+      "strategy": "clone_nearest",
+      "timing_ms": {
+        "encode": 9199.64613,
+        "total": 9204.369047
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 3,
+      "n_channels_loaded": 10,
+      "n_channels_padded": 2,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "10ch_clone_fp1",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.3504345417022705,
+        "mean": 0.05193121266066656,
+        "mean_abs": 0.6929911971092224,
+        "min": -3.132011890411377,
+        "std": 0.8605988370466948
+      },
+      "strategy": "clone_fp1",
+      "timing_ms": {
+        "encode": 9701.346087999998,
+        "total": 9706.059713
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 4,
+      "n_channels_loaded": 10,
+      "n_channels_padded": 2,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "10ch_noisy_clone",
+      "noise_factor": 0.20000000298023224,
+      "section": "strategy",
+      "stats": {
+        "max": 3.380988121032715,
+        "mean": 0.05374513455193311,
+        "mean_abs": 0.6881642937660217,
+        "min": -3.2222747802734375,
+        "std": 0.854586925935301
+      },
+      "strategy": "noisy_clone",
+      "timing_ms": {
+        "encode": 10564.595839000001,
+        "total": 10569.400421999999
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 5,
+      "n_channels_loaded": 10,
+      "n_channels_padded": 2,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "10ch_xyz_jitter",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.432654619216919,
+        "mean": 0.05234321734073243,
+        "mean_abs": 0.6916384100914001,
+        "min": -3.280665636062622,
+        "std": 0.8580244942227279
+      },
+      "strategy": "xyz_jitter",
+      "timing_ms": {
+        "encode": 9954.366713000001,
+        "total": 9959.021630000001
+      },
+      "xyz_jitter_m": 0.004999999888241291
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 6,
+      "n_channels_loaded": 10,
+      "n_channels_padded": 2,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "10ch_interp_weighted",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.4426403045654297,
+        "mean": 0.0503724905769559,
+        "mean_abs": 0.6945716738700867,
+        "min": -3.161128282546997,
+        "std": 0.861029657498702
+      },
+      "strategy": "interp_weighted",
+      "timing_ms": {
+        "encode": 9219.630711,
+        "total": 9224.673794999999
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 7,
+      "n_channels_loaded": 10,
+      "n_channels_padded": 2,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "10ch_mirror",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.4090888500213623,
+        "mean": 0.05167523567726246,
+        "mean_abs": 0.6936933398246765,
+        "min": -3.266590118408203,
+        "std": 0.8611930510718174
+      },
+      "strategy": "mirror",
+      "timing_ms": {
+        "encode": 9115.622838,
+        "total": 9120.213005
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 8,
+      "n_channels_loaded": 10,
+      "n_channels_padded": 2,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "10ch_mean_ref",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.495669364929199,
+        "mean": 0.04298561180262621,
+        "mean_abs": 0.6799474358558655,
+        "min": -3.1366419792175293,
+        "std": 0.8458264905919474
+      },
+      "strategy": "mean_ref",
+      "timing_ms": {
+        "encode": 9367.44663,
+        "total": 9372.048963
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 9,
+      "n_channels_loaded": 10,
+      "n_channels_padded": 2,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 400,
+      "n_total_vectors": 1200,
+      "name": "10ch_native",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.5221755504608154,
+        "mean": 0.05287274126587363,
+        "mean_abs": 0.6956120729446411,
+        "min": -3.1476545333862305,
+        "std": 0.8622380338155045
+      },
+      "strategy": "native",
+      "timing_ms": {
+        "encode": 7703.070587,
+        "total": 7707.045795
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 10,
+      "n_channels_loaded": 8,
+      "n_channels_padded": 4,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "8ch_zero_pad",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.119879722595215,
+        "mean": 0.04361236447196764,
+        "mean_abs": 0.6917086839675903,
+        "min": -3.234506607055664,
+        "std": 0.8570927688540507
+      },
+      "strategy": "zero_pad",
+      "timing_ms": {
+        "encode": 9218.368504,
+        "total": 9223.04617
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 11,
+      "n_channels_loaded": 8,
+      "n_channels_padded": 4,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "8ch_clone_nearest",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.1224865913391113,
+        "mean": 0.05414687082917327,
+        "mean_abs": 0.6923544406890869,
+        "min": -3.146001100540161,
+        "std": 0.85926462926533
+      },
+      "strategy": "clone_nearest",
+      "timing_ms": {
+        "encode": 9303.025504000001,
+        "total": 9307.724420999999
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 12,
+      "n_channels_loaded": 8,
+      "n_channels_padded": 4,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "8ch_clone_fp1",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.1318323612213135,
+        "mean": 0.049816472789212994,
+        "mean_abs": 0.6887248754501343,
+        "min": -3.080584764480591,
+        "std": 0.8562225051986465
+      },
+      "strategy": "clone_fp1",
+      "timing_ms": {
+        "encode": 9169.360504,
+        "total": 9174.295254
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 13,
+      "n_channels_loaded": 8,
+      "n_channels_padded": 4,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "8ch_noisy_clone",
+      "noise_factor": 0.20000000298023224,
+      "section": "strategy",
+      "stats": {
+        "max": 2.9870874881744385,
+        "mean": 0.05645432113887839,
+        "mean_abs": 0.6745893955230713,
+        "min": -3.198538064956665,
+        "std": 0.8377038114123883
+      },
+      "strategy": "noisy_clone",
+      "timing_ms": {
+        "encode": 9124.625712000001,
+        "total": 9129.646836999998
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 14,
+      "n_channels_loaded": 8,
+      "n_channels_padded": 4,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "8ch_xyz_jitter",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.2558674812316895,
+        "mean": 0.06090488536874798,
+        "mean_abs": 0.6918898820877075,
+        "min": -3.150118112564087,
+        "std": 0.8565564311843156
+      },
+      "strategy": "xyz_jitter",
+      "timing_ms": {
+        "encode": 9139.612379,
+        "total": 9144.153795999999
+      },
+      "xyz_jitter_m": 0.004999999888241291
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 15,
+      "n_channels_loaded": 8,
+      "n_channels_padded": 4,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "8ch_interp_weighted",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.124072551727295,
+        "mean": 0.052177575507799806,
+        "mean_abs": 0.6936559081077576,
+        "min": -3.098958969116211,
+        "std": 0.8599033503486667
+      },
+      "strategy": "interp_weighted",
+      "timing_ms": {
+        "encode": 9123.547213,
+        "total": 9128.114671000001
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 16,
+      "n_channels_loaded": 8,
+      "n_channels_padded": 4,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "8ch_mirror",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.3936314582824707,
+        "mean": 0.054020717534300884,
+        "mean_abs": 0.6937342882156372,
+        "min": -3.316545248031616,
+        "std": 0.8601232096922986
+      },
+      "strategy": "mirror",
+      "timing_ms": {
+        "encode": 9147.654045,
+        "total": 9152.279629
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 17,
+      "n_channels_loaded": 8,
+      "n_channels_padded": 4,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "8ch_mean_ref",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 2.959756851196289,
+        "mean": 0.03323010460017788,
+        "mean_abs": 0.6657022833824158,
+        "min": -3.2118136882781982,
+        "std": 0.8287314483863667
+      },
+      "strategy": "mean_ref",
+      "timing_ms": {
+        "encode": 9180.163755000001,
+        "total": 9184.800421
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 18,
+      "n_channels_loaded": 8,
+      "n_channels_padded": 4,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 320,
+      "n_total_vectors": 960,
+      "name": "8ch_native",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.6243882179260254,
+        "mean": 0.05281186302184627,
+        "mean_abs": 0.6898460388183594,
+        "min": -2.961310625076294,
+        "std": 0.8557381876071144
+      },
+      "strategy": "native",
+      "timing_ms": {
+        "encode": 6123.392210999999,
+        "total": 6126.422087
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 19,
+      "n_channels_loaded": 6,
+      "n_channels_padded": 6,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "6ch_zero_pad",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.0371832847595215,
+        "mean": 0.03225114492133293,
+        "mean_abs": 0.692888617515564,
+        "min": -2.9771811962127686,
+        "std": 0.8551874081619597
+      },
+      "strategy": "zero_pad",
+      "timing_ms": {
+        "encode": 9096.455921,
+        "total": 9101.015587
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 20,
+      "n_channels_loaded": 6,
+      "n_channels_padded": 6,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "6ch_clone_nearest",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.110877275466919,
+        "mean": 0.05305937721404664,
+        "mean_abs": 0.693009614944458,
+        "min": -3.095890998840332,
+        "std": 0.8603915684497673
+      },
+      "strategy": "clone_nearest",
+      "timing_ms": {
+        "encode": 9346.607128,
+        "total": 9351.065545000001
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 21,
+      "n_channels_loaded": 6,
+      "n_channels_padded": 6,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "6ch_clone_fp1",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.017549514770508,
+        "mean": 0.04421360677228752,
+        "mean_abs": 0.6886547207832336,
+        "min": -3.098909854888916,
+        "std": 0.8556063545947541
+      },
+      "strategy": "clone_fp1",
+      "timing_ms": {
+        "encode": 9581.746922,
+        "total": 9586.269088
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 22,
+      "n_channels_loaded": 6,
+      "n_channels_padded": 6,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "6ch_noisy_clone",
+      "noise_factor": 0.20000000298023224,
+      "section": "strategy",
+      "stats": {
+        "max": 3.2616982460021973,
+        "mean": 0.06281947062826829,
+        "mean_abs": 0.6632376909255981,
+        "min": -2.9654486179351807,
+        "std": 0.8244259209988675
+      },
+      "strategy": "noisy_clone",
+      "timing_ms": {
+        "encode": 9613.032379,
+        "total": 9617.913962999999
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 23,
+      "n_channels_loaded": 6,
+      "n_channels_padded": 6,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "6ch_xyz_jitter",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.355113983154297,
+        "mean": 0.059324433320587865,
+        "mean_abs": 0.6914604306221008,
+        "min": -3.01596999168396,
+        "std": 0.856712741421186
+      },
+      "strategy": "xyz_jitter",
+      "timing_ms": {
+        "encode": 9987.53213,
+        "total": 9992.381879
+      },
+      "xyz_jitter_m": 0.004999999888241291
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 24,
+      "n_channels_loaded": 6,
+      "n_channels_padded": 6,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "6ch_interp_weighted",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.132145881652832,
+        "mean": 0.05004903474360213,
+        "mean_abs": 0.6951414942741394,
+        "min": -3.0791115760803223,
+        "std": 0.8614789189805974
+      },
+      "strategy": "interp_weighted",
+      "timing_ms": {
+        "encode": 10105.913297000001,
+        "total": 10110.716588000001
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 25,
+      "n_channels_loaded": 6,
+      "n_channels_padded": 6,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "6ch_mirror",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.2873830795288086,
+        "mean": 0.05307525672857562,
+        "mean_abs": 0.6939060688018799,
+        "min": -2.95198130607605,
+        "std": 0.8608635949861225
+      },
+      "strategy": "mirror",
+      "timing_ms": {
+        "encode": 10772.488213999999,
+        "total": 10777.339547
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 26,
+      "n_channels_loaded": 6,
+      "n_channels_padded": 6,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "6ch_mean_ref",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 2.7731711864471436,
+        "mean": 0.022110910648388604,
+        "mean_abs": 0.6547749638557434,
+        "min": -2.8652584552764893,
+        "std": 0.8142495952326738
+      },
+      "strategy": "mean_ref",
+      "timing_ms": {
+        "encode": 11844.773672000001,
+        "total": 11849.927255
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4",
+        "P3",
+        "P4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 27,
+      "n_channels_loaded": 6,
+      "n_channels_padded": 6,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 240,
+      "n_total_vectors": 720,
+      "name": "6ch_native",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.4213640689849854,
+        "mean": 0.046389318205711384,
+        "mean_abs": 0.6851066946983337,
+        "min": -2.990839958190918,
+        "std": 0.848920933270345
+      },
+      "strategy": "native",
+      "timing_ms": {
+        "encode": 5980.533170000001,
+        "total": 5983.294169
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 28,
+      "n_channels_loaded": 4,
+      "n_channels_padded": 8,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "4ch_zero_pad",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.0722434520721436,
+        "mean": 0.027265893247715667,
+        "mean_abs": 0.6891278028488159,
+        "min": -3.069122791290283,
+        "std": 0.852299524840379
+      },
+      "strategy": "zero_pad",
+      "timing_ms": {
+        "encode": 9475.397338,
+        "total": 9480.190587
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 29,
+      "n_channels_loaded": 4,
+      "n_channels_padded": 8,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "4ch_clone_nearest",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.000288248062134,
+        "mean": 0.05374355175045669,
+        "mean_abs": 0.6913010478019714,
+        "min": -3.0337114334106445,
+        "std": 0.8592043395040138
+      },
+      "strategy": "clone_nearest",
+      "timing_ms": {
+        "encode": 9243.035129000002,
+        "total": 9247.555461999998
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 30,
+      "n_channels_loaded": 4,
+      "n_channels_padded": 8,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "4ch_clone_fp1",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 2.954009771347046,
+        "mean": 0.02854466957505161,
+        "mean_abs": 0.6838600039482117,
+        "min": -3.270514726638794,
+        "std": 0.8459460019116861
+      },
+      "strategy": "clone_fp1",
+      "timing_ms": {
+        "encode": 9193.004129,
+        "total": 9197.54013
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 31,
+      "n_channels_loaded": 4,
+      "n_channels_padded": 8,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "4ch_noisy_clone",
+      "noise_factor": 0.20000000298023224,
+      "section": "strategy",
+      "stats": {
+        "max": 3.0258541107177734,
+        "mean": 0.06564662652252132,
+        "mean_abs": 0.6520464420318604,
+        "min": -2.945870876312256,
+        "std": 0.8119772936490721
+      },
+      "strategy": "noisy_clone",
+      "timing_ms": {
+        "encode": 9223.571838,
+        "total": 9228.573171
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 32,
+      "n_channels_loaded": 4,
+      "n_channels_padded": 8,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "4ch_xyz_jitter",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.0084643363952637,
+        "mean": 0.05839724978057145,
+        "mean_abs": 0.6840828657150269,
+        "min": -3.2710955142974854,
+        "std": 0.8513471660467478
+      },
+      "strategy": "xyz_jitter",
+      "timing_ms": {
+        "encode": 9383.184546,
+        "total": 9387.698254
+      },
+      "xyz_jitter_m": 0.004999999888241291
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 33,
+      "n_channels_loaded": 4,
+      "n_channels_padded": 8,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "4ch_interp_weighted",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.3354299068450928,
+        "mean": 0.04434016196357536,
+        "mean_abs": 0.6926381587982178,
+        "min": -2.9960997104644775,
+        "std": 0.8574961471443452
+      },
+      "strategy": "interp_weighted",
+      "timing_ms": {
+        "encode": 9352.721672,
+        "total": 9357.328338000001
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 34,
+      "n_channels_loaded": 4,
+      "n_channels_padded": 8,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "4ch_mirror",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.0851948261260986,
+        "mean": 0.054106523642993426,
+        "mean_abs": 0.6916259527206421,
+        "min": -3.2005507946014404,
+        "std": 0.859531443251154
+      },
+      "strategy": "mirror",
+      "timing_ms": {
+        "encode": 9248.816963,
+        "total": 9253.316504
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 35,
+      "n_channels_loaded": 4,
+      "n_channels_padded": 8,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "4ch_mean_ref",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 2.951552391052246,
+        "mean": 0.011046985360549873,
+        "mean_abs": 0.6408019065856934,
+        "min": -3.0343284606933594,
+        "std": 0.7970549003585579
+      },
+      "strategy": "mean_ref",
+      "timing_ms": {
+        "encode": 10104.848629,
+        "total": 10111.402546000001
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2",
+        "C3",
+        "C4"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 36,
+      "n_channels_loaded": 4,
+      "n_channels_padded": 8,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 160,
+      "n_total_vectors": 480,
+      "name": "4ch_native",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 2.923429489135742,
+        "mean": 0.042337297104010456,
+        "mean_abs": 0.6788350939750671,
+        "min": -2.900303840637207,
+        "std": 0.8431945104712794
+      },
+      "strategy": "native",
+      "timing_ms": {
+        "encode": 4388.531293999999,
+        "total": 4390.18321
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 37,
+      "n_channels_loaded": 2,
+      "n_channels_padded": 10,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "2ch_zero_pad",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.1314334869384766,
+        "mean": 0.021112553740181284,
+        "mean_abs": 0.6878358721733093,
+        "min": -3.130709171295166,
+        "std": 0.8501109624874216
+      },
+      "strategy": "zero_pad",
+      "timing_ms": {
+        "encode": 10181.363296000001,
+        "total": 10186.257920999999
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 38,
+      "n_channels_loaded": 2,
+      "n_channels_padded": 10,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "2ch_clone_nearest",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.286372184753418,
+        "mean": 0.06396221588623424,
+        "mean_abs": 0.6663983464241028,
+        "min": -3.3903579711914062,
+        "std": 0.8339708644381623
+      },
+      "strategy": "clone_nearest",
+      "timing_ms": {
+        "encode": 9919.093213,
+        "total": 9923.713005
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 39,
+      "n_channels_loaded": 2,
+      "n_channels_padded": 10,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "2ch_clone_fp1",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.0590567588806152,
+        "mean": 0.009590363276907333,
+        "mean_abs": 0.6694145798683167,
+        "min": -2.902388334274292,
+        "std": 0.8293994315811164
+      },
+      "strategy": "clone_fp1",
+      "timing_ms": {
+        "encode": 9837.149505,
+        "total": 9841.670379
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 40,
+      "n_channels_loaded": 2,
+      "n_channels_padded": 10,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "2ch_noisy_clone",
+      "noise_factor": 0.20000000298023224,
+      "section": "strategy",
+      "stats": {
+        "max": 3.2871651649475098,
+        "mean": 0.07127137081751395,
+        "mean_abs": 0.6290964484214783,
+        "min": -2.8534388542175293,
+        "std": 0.7843449000260267
+      },
+      "strategy": "noisy_clone",
+      "timing_ms": {
+        "encode": 9869.279379,
+        "total": 9874.807171
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 41,
+      "n_channels_loaded": 2,
+      "n_channels_padded": 10,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "2ch_xyz_jitter",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.285186290740967,
+        "mean": 0.06325879426301904,
+        "mean_abs": 0.6583113074302673,
+        "min": -3.358668565750122,
+        "std": 0.8236345531316802
+      },
+      "strategy": "xyz_jitter",
+      "timing_ms": {
+        "encode": 9504.673421,
+        "total": 9509.252421
+      },
+      "xyz_jitter_m": 0.004999999888241291
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 42,
+      "n_channels_loaded": 2,
+      "n_channels_padded": 10,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "2ch_interp_weighted",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.149672746658325,
+        "mean": 0.02319025793985803,
+        "mean_abs": 0.662423849105835,
+        "min": -3.1322832107543945,
+        "std": 0.8232633766881293
+      },
+      "strategy": "interp_weighted",
+      "timing_ms": {
+        "encode": 9594.359254,
+        "total": 9598.888212
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 43,
+      "n_channels_loaded": 2,
+      "n_channels_padded": 10,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "2ch_mirror",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.3117668628692627,
+        "mean": 0.06443465687809496,
+        "mean_abs": 0.6669241786003113,
+        "min": -3.2348544597625732,
+        "std": 0.8343879718124529
+      },
+      "strategy": "mirror",
+      "timing_ms": {
+        "encode": 9962.312838000002,
+        "total": 9966.862172000001
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 44,
+      "n_channels_loaded": 2,
+      "n_channels_padded": 10,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 480,
+      "n_total_vectors": 1440,
+      "name": "2ch_mean_ref",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 3.0512948036193848,
+        "mean": -0.0018630499599440655,
+        "mean_abs": 0.6225394010543823,
+        "min": -2.9746816158294678,
+        "std": 0.7737767176865169
+      },
+      "strategy": "mean_ref",
+      "timing_ms": {
+        "encode": 10313.585505000001,
+        "total": 10318.477837999999
+      },
+      "xyz_jitter_m": 0.0
+    },
+    {
+      "channels_loaded": [
+        "Fp1",
+        "Fp2"
+      ],
+      "channels_target": [
+        "Fp1",
+        "Fp2",
+        "F3",
+        "F4",
+        "C3",
+        "C4",
+        "P3",
+        "P4",
+        "O1",
+        "O2",
+        "F7",
+        "F8"
+      ],
+      "embedding_dim": 32,
+      "index": 45,
+      "n_channels_loaded": 2,
+      "n_channels_padded": 10,
+      "n_channels_target": 12,
+      "n_epochs": 3,
+      "n_tokens_per_epoch": 80,
+      "n_total_vectors": 240,
+      "name": "2ch_native",
+      "noise_factor": 0.0,
+      "section": "strategy",
+      "stats": {
+        "max": 2.9274232387542725,
+        "mean": 0.04966047373142525,
+        "mean_abs": 0.6355336904525757,
+        "min": -2.7421176433563232,
+        "std": 0.797767525261055
+      },
+      "strategy": "native",
+      "timing_ms": {
+        "encode": 3240.610127,
+        "total": 3241.471418
+      },
+      "xyz_jitter_m": 0.0
+    }
+  ],
+  "embedding_dim": 32,
+  "embeddings_npy": "/agent/zuna-rs/data/channel_bench_strategy_embeddings.npy",
+  "fif_file": "/agent/zuna-rs/data/sample1_raw.fif",
+  "labels_npy": "/agent/zuna-rs/data/channel_bench_strategy_labels.npy",
+  "mode": "Strategy",
+  "n_configs": 46,
+  "noise_factor": 0.20000000298023224,
+  "timestamp": "2026-03-06T08:12:10Z",
+  "total_vectors": 62640,
+  "xyz_jitter_m": 0.004999999888241291
+}

@@ -66,7 +66,10 @@
 
 // ── Internal modules ─────────────────────────────────────────────────────────
 
+pub mod channel_positions;
 pub mod config;
+pub mod csv_export;
+pub mod csv_loader;
 pub mod data;
 pub mod encoder;
 pub mod decoder;
@@ -93,3 +96,15 @@ pub use config::{ModelConfig, DataConfig, InferConfig};
 
 // Data types needed for the lower-level API
 pub use data::{InputBatch, FifInfo};
+
+// Channel position lookup
+pub use channel_positions::{channel_xyz, MontageLayout, montage_channels, nearest_channel, normalise};
+
+// CSV / tensor data loading
+pub use csv_loader::{
+    load_from_csv, load_from_raw_tensor, load_from_named_tensor,
+    PaddingStrategy, CsvLoadOptions, CsvInfo,
+};
+
+// CSV export from FIF
+pub use csv_export::fif_to_csv;

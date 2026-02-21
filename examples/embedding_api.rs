@@ -67,7 +67,7 @@ struct Args {
     fif: PathBuf,
 
     /// Output safetensors file for the embeddings produced by path A.
-    #[arg(long, default_value = "embeddings.safetensors")]
+    #[arg(long, default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/data/api_embeddings.safetensors"))]
     output: PathBuf,
 }
 
@@ -143,7 +143,8 @@ fn run<B: Backend>(device: B::Device, args: Args) -> anyhow::Result<()> {
         // Keys per epoch N: embeddings_N [n_tokens, dim], tok_idx_N [n_tokens, 4],
         //                   chan_pos_N   [n_channels, 3]
         // Plus: n_samples (scalar).
-        r.save_safetensors(args.output.to_str().unwrap_or("embeddings.safetensors"))?;
+        if let Some(p) = args.output.parent() { std::fs::create_dir_all(p)?; }
+        r.save_safetensors(args.output.to_str().unwrap_or("data/api_embeddings.safetensors"))?;
         println!("Saved       : {}\n", args.output.display());
         r
     };

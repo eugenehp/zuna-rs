@@ -1850,7 +1850,8 @@ dependencies = [
 [[package]]
 name = "exg"
 version = "0.0.1"
-source = "git+https://github.com/eugenehp/exg?tag=0.0.1#93d64203e92056bd53734991ae08d9c2df946c95"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f96fd9ff4b0e97d18a9b5e6185301e783385aafea8bb4ddf5342bb1de57d1921"
 dependencies = [
  "anyhow",
  "clap",

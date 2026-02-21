@@ -10,6 +10,11 @@ homepage      = "https://github.com/eugenehp/zuna-rs"
 repository    = "https://github.com/eugenehp/zuna-rs"
 documentation = "https://docs.rs/zuna-rs"
 
+exclude = [
+    'data/*',
+    'figures/*'
+]
+
 [lib]
 name = "zuna_rs"
 path = "src/lib.rs"
@@ -40,6 +45,18 @@ path = "examples/embedding_api.rs"
 # GPU: cargo run --example embedding_api --release \
 #        --no-default-features --features wgpu
 
+[[example]]
+name = "csv_embed"
+path = "examples/csv_embed.rs"
+# Embed EEG from a CSV file with configurable channels and padding strategy.
+# cargo run --example csv_embed --release -- --csv data/sample.csv
+
+[[example]]
+name = "channel_bench"
+path = "examples/channel_bench.rs"
+# Benchmark 26 channel-padding configurations and produce UMAP figures.
+# cargo run --example channel_bench --release
+
 [[bin]]
 name = "download_weights"
 path = "src/bin/download_weights.rs"
@@ -64,7 +81,8 @@ burn = { version = "0.20.1", default-features = false, features = ["std", "simd"
 burn-ndarray = { version = "0.20.1", default-features = false, features = ["std", "simd", "multi-threads"], optional = true }
 
 # EEG preprocessing (FIF reader + full pipeline in pure Rust).
-exg = { git = "https://github.com/eugenehp/exg", tag = "0.0.1", version = "0.0.1"}
+# exg = { git = "https://github.com/eugenehp/exg", tag = "0.0.1", version = "0.0.1"}
+exg = "0.0.1"
 
 # ndarray — used to pass Array2<f32> between exg and Burn tensors.
 ndarray = "0.17"
