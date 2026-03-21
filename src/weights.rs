@@ -54,17 +54,50 @@ pub struct WeightMap {
     tensors: HashMap<String, (Vec<f32>, Vec<usize>)>,
 }
 
+/// Optional prefix filter for [`WeightMap::from_file_filtered`].
+///
+/// When set to `Encoder`, only tensors whose (prefix-stripped) key starts with
+/// `"encoder."` or `"encoder_"` are loaded.  All others are skipped — saving
+/// roughly half the bf16→f32 conversion work and memory when only embeddings
+/// are needed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WeightFilter {
+    /// Load every tensor in the file.
+    All,
+    /// Load only encoder tensors (skip decoder).
+    Encoder,
+}
+
 impl WeightMap {
+    /// Load all tensors from a safetensors file.
     pub fn from_file(path: &str) -> anyhow::Result<Self> {
+        Self::from_file_filtered(path, WeightFilter::All)
+    }
+
+    /// Load tensors from a safetensors file, optionally filtering by component.
+    ///
+    /// When `filter` is [`WeightFilter::Encoder`], decoder tensors are skipped
+    /// entirely — no bf16→f32 conversion or allocation is performed for them.
+    /// This roughly halves load time and peak memory for encoder-only use.
+    pub fn from_file_filtered(path: &str, filter: WeightFilter) -> anyhow::Result<Self> {
         let bytes = std::fs::read(path)?;
         let st    = SafeTensors::deserialize(&bytes)?;
-        let mut tensors = HashMap::new();
+        let n_tensors = st.len();
+        let mut tensors = HashMap::with_capacity(n_tensors);
 
         for (raw_key, view) in st.tensors() {
             let key = raw_key
                 .strip_prefix("model.")
                 .unwrap_or(raw_key.as_str())
                 .to_string();
+
+            // Skip tensors that don't match the filter.
+            if filter == WeightFilter::Encoder
+                && !key.starts_with("encoder.")
+                && !key.starts_with("encoder_")
+            {
+                continue;
+            }
 
             let shape: Vec<usize> = view.shape().to_vec();
             let data  = view.data();
@@ -87,7 +120,32 @@ impl WeightMap {
         Ok(Self { tensors })
     }
 
+    /// Take a tensor by key, **removing** it from the map to avoid cloning.
+    ///
+    /// Prefer this over [`Self::get`] when you are loading weights into a model
+    /// and won't need the same key again — it avoids a full `Vec<f32>` clone.
+    pub fn take<B: Backend, const N: usize>(
+        &mut self,
+        key: &str,
+        device: &B::Device,
+    ) -> anyhow::Result<Tensor<B, N>> {
+        let (data, shape) = self.tensors.remove(key)
+            .ok_or_else(|| anyhow::anyhow!("weight key not found: {key}"))?;
+
+        if shape.len() != N {
+            anyhow::bail!("rank mismatch for {key}: expected {N}, got {}", shape.len());
+        }
+
+        Ok(Tensor::<B, N>::from_data(
+            TensorData::new(data, shape),
+            device,
+        ))
+    }
+
     /// Load a tensor by its (prefix-stripped) safetensors key.
+    ///
+    /// **Note:** this clones the underlying `Vec<f32>`.  Prefer [`Self::take`]
+    /// when each key is consumed exactly once (typical weight-loading pattern).
     pub fn get<B: Backend, const N: usize>(
         &self,
         key: &str,
@@ -160,111 +218,115 @@ fn set_rmsnorm<B: Backend>(norm: &mut burn::nn::RmsNorm<B>, w: Tensor<B, 1>) {
 // ── Internal per-component loaders ───────────────────────────────────────────
 
 /// Populate an already-constructed [`EncoderTransformer`] from a [`WeightMap`].
+///
+/// Uses [`WeightMap::take`] to move tensor data out of the map without cloning.
 fn load_encoder_from_wm<B: Backend>(
-    wm:     &WeightMap,
+    wm:     &mut WeightMap,
     enc:    &mut EncoderTransformer<B>,
     device: &B::Device,
 ) -> anyhow::Result<()> {
     set_linear_wb(
         &mut enc.tok_embeddings,
-        wm.get("encoder.tok_embeddings.weight", device)?,
-        wm.get("encoder.tok_embeddings.bias",   device)?,
+        wm.take("encoder.tok_embeddings.weight", device)?,
+        wm.take("encoder.tok_embeddings.bias",   device)?,
     );
 
-    let regs: Tensor<B, 2> = wm.get("encoder.registers", device)?;
+    let regs: Tensor<B, 2> = wm.take("encoder.registers", device)?;
     enc.registers = enc.registers.clone().map(|_| regs);
 
-    let norm_w: Tensor<B, 1> = wm.get("encoder.norm.weight", device)?;
+    let norm_w: Tensor<B, 1> = wm.take("encoder.norm.weight", device)?;
     set_rmsnorm(&mut enc.norm.inner, norm_w);
 
-    set_linear_w(&mut enc.output, wm.get("encoder.output.weight", device)?);
+    set_linear_w(&mut enc.output, wm.take("encoder.output.weight", device)?);
 
     for (i, layer) in enc.layers.iter_mut().enumerate() {
         let p = format!("encoder.layers.{i}");
 
-        let an_w: Tensor<B, 1> = wm.get(&format!("{p}.attention_norm.weight"), device)?;
+        let an_w: Tensor<B, 1> = wm.take(&format!("{p}.attention_norm.weight"), device)?;
         set_rmsnorm(&mut layer.attention_norm.inner, an_w);
 
-        set_linear_w(&mut layer.attention.wq, wm.get(&format!("{p}.attention.wq.weight"), device)?);
-        set_linear_w(&mut layer.attention.wk, wm.get(&format!("{p}.attention.wk.weight"), device)?);
-        set_linear_w(&mut layer.attention.wv, wm.get(&format!("{p}.attention.wv.weight"), device)?);
-        set_linear_w(&mut layer.attention.wo, wm.get(&format!("{p}.attention.wo.weight"), device)?);
+        set_linear_w(&mut layer.attention.wq, wm.take(&format!("{p}.attention.wq.weight"), device)?);
+        set_linear_w(&mut layer.attention.wk, wm.take(&format!("{p}.attention.wk.weight"), device)?);
+        set_linear_w(&mut layer.attention.wv, wm.take(&format!("{p}.attention.wv.weight"), device)?);
+        set_linear_w(&mut layer.attention.wo, wm.take(&format!("{p}.attention.wo.weight"), device)?);
 
-        let fn_w: Tensor<B, 1> = wm.get(&format!("{p}.ffn_norm.weight"), device)?;
+        let fn_w: Tensor<B, 1> = wm.take(&format!("{p}.ffn_norm.weight"), device)?;
         set_rmsnorm(&mut layer.ffn_norm.inner, fn_w);
 
-        set_linear_w(&mut layer.feed_forward.w1, wm.get(&format!("{p}.feed_forward.w1.weight"), device)?);
-        set_linear_w(&mut layer.feed_forward.w2, wm.get(&format!("{p}.feed_forward.w2.weight"), device)?);
-        set_linear_w(&mut layer.feed_forward.w3, wm.get(&format!("{p}.feed_forward.w3.weight"), device)?);
+        set_linear_w(&mut layer.feed_forward.w1, wm.take(&format!("{p}.feed_forward.w1.weight"), device)?);
+        set_linear_w(&mut layer.feed_forward.w2, wm.take(&format!("{p}.feed_forward.w2.weight"), device)?);
+        set_linear_w(&mut layer.feed_forward.w3, wm.take(&format!("{p}.feed_forward.w3.weight"), device)?);
     }
     Ok(())
 }
 
 /// Populate an already-constructed [`DecoderTransformer`] from a [`WeightMap`].
+///
+/// Uses [`WeightMap::take`] to move tensor data out of the map without cloning.
 fn load_decoder_from_wm<B: Backend>(
-    wm:     &WeightMap,
+    wm:     &mut WeightMap,
     dec:    &mut DecoderTransformer<B>,
     device: &B::Device,
 ) -> anyhow::Result<()> {
     set_linear_wb(
         &mut dec.tok_embeddings,
-        wm.get("decoder.tok_embeddings.weight", device)?,
-        wm.get("decoder.tok_embeddings.bias",   device)?,
+        wm.take("decoder.tok_embeddings.weight", device)?,
+        wm.take("decoder.tok_embeddings.bias",   device)?,
     );
 
-    let fc_w: Tensor<B, 2> = wm.get("decoder.t_embedder.weight", device)?;
+    let fc_w: Tensor<B, 2> = wm.take("decoder.t_embedder.weight", device)?;
     dec.t_embedder.weight = dec.t_embedder.weight.clone().map(|_| fc_w);
     set_linear_wb(
         &mut dec.t_embedder.proj,
-        wm.get("decoder.t_embedder.proj.weight", device)?,
-        wm.get("decoder.t_embedder.proj.bias",   device)?,
+        wm.take("decoder.t_embedder.proj.weight", device)?,
+        wm.take("decoder.t_embedder.proj.bias",   device)?,
     );
 
     set_linear_wb(
         &mut dec.encoder_proj,
-        wm.get("decoder.encoder_proj.weight", device)?,
-        wm.get("decoder.encoder_proj.bias",   device)?,
+        wm.take("decoder.encoder_proj.weight", device)?,
+        wm.take("decoder.encoder_proj.bias",   device)?,
     );
 
     // AdaRMSNorm final norm — inner Linear is named "weight" in PyTorch.
     // safetensors keys: decoder.norm.weight.weight / decoder.norm.weight.bias
     set_linear_wb(
         &mut dec.norm.weight,
-        wm.get("decoder.norm.weight.weight", device)?,
-        wm.get("decoder.norm.weight.bias",   device)?,
+        wm.take("decoder.norm.weight.weight", device)?,
+        wm.take("decoder.norm.weight.bias",   device)?,
     );
 
-    set_linear_w(&mut dec.output, wm.get("decoder.output.weight", device)?);
+    set_linear_w(&mut dec.output, wm.take("decoder.output.weight", device)?);
 
     for (i, layer) in dec.layers.iter_mut().enumerate() {
         let p = format!("decoder.layers.{i}");
 
         set_linear_wb(&mut layer.cross_attention_x_norm.weight,
-            wm.get(&format!("{p}.cross_attention_x_norm.weight.weight"), device)?,
-            wm.get(&format!("{p}.cross_attention_x_norm.weight.bias"),   device)?);
+            wm.take(&format!("{p}.cross_attention_x_norm.weight.weight"), device)?,
+            wm.take(&format!("{p}.cross_attention_x_norm.weight.bias"),   device)?);
         set_linear_wb(&mut layer.cross_attention_y_norm.weight,
-            wm.get(&format!("{p}.cross_attention_y_norm.weight.weight"), device)?,
-            wm.get(&format!("{p}.cross_attention_y_norm.weight.bias"),   device)?);
+            wm.take(&format!("{p}.cross_attention_y_norm.weight.weight"), device)?,
+            wm.take(&format!("{p}.cross_attention_y_norm.weight.bias"),   device)?);
 
-        set_linear_w(&mut layer.cross_attention.wq, wm.get(&format!("{p}.cross_attention.wq.weight"), device)?);
-        set_linear_w(&mut layer.cross_attention.wk, wm.get(&format!("{p}.cross_attention.wk.weight"), device)?);
-        set_linear_w(&mut layer.cross_attention.wv, wm.get(&format!("{p}.cross_attention.wv.weight"), device)?);
-        set_linear_w(&mut layer.cross_attention.wo, wm.get(&format!("{p}.cross_attention.wo.weight"), device)?);
+        set_linear_w(&mut layer.cross_attention.wq, wm.take(&format!("{p}.cross_attention.wq.weight"), device)?);
+        set_linear_w(&mut layer.cross_attention.wk, wm.take(&format!("{p}.cross_attention.wk.weight"), device)?);
+        set_linear_w(&mut layer.cross_attention.wv, wm.take(&format!("{p}.cross_attention.wv.weight"), device)?);
+        set_linear_w(&mut layer.cross_attention.wo, wm.take(&format!("{p}.cross_attention.wo.weight"), device)?);
 
         set_linear_wb(&mut layer.attention_norm.weight,
-            wm.get(&format!("{p}.attention_norm.weight.weight"), device)?,
-            wm.get(&format!("{p}.attention_norm.weight.bias"),   device)?);
-        set_linear_w(&mut layer.attention.wq, wm.get(&format!("{p}.attention.wq.weight"), device)?);
-        set_linear_w(&mut layer.attention.wk, wm.get(&format!("{p}.attention.wk.weight"), device)?);
-        set_linear_w(&mut layer.attention.wv, wm.get(&format!("{p}.attention.wv.weight"), device)?);
-        set_linear_w(&mut layer.attention.wo, wm.get(&format!("{p}.attention.wo.weight"), device)?);
+            wm.take(&format!("{p}.attention_norm.weight.weight"), device)?,
+            wm.take(&format!("{p}.attention_norm.weight.bias"),   device)?);
+        set_linear_w(&mut layer.attention.wq, wm.take(&format!("{p}.attention.wq.weight"), device)?);
+        set_linear_w(&mut layer.attention.wk, wm.take(&format!("{p}.attention.wk.weight"), device)?);
+        set_linear_w(&mut layer.attention.wv, wm.take(&format!("{p}.attention.wv.weight"), device)?);
+        set_linear_w(&mut layer.attention.wo, wm.take(&format!("{p}.attention.wo.weight"), device)?);
 
         set_linear_wb(&mut layer.ffn_norm.weight,
-            wm.get(&format!("{p}.ffn_norm.weight.weight"), device)?,
-            wm.get(&format!("{p}.ffn_norm.weight.bias"),   device)?);
-        set_linear_w(&mut layer.feed_forward.w1, wm.get(&format!("{p}.feed_forward.w1.weight"), device)?);
-        set_linear_w(&mut layer.feed_forward.w2, wm.get(&format!("{p}.feed_forward.w2.weight"), device)?);
-        set_linear_w(&mut layer.feed_forward.w3, wm.get(&format!("{p}.feed_forward.w3.weight"), device)?);
+            wm.take(&format!("{p}.ffn_norm.weight.weight"), device)?,
+            wm.take(&format!("{p}.ffn_norm.weight.bias"),   device)?);
+        set_linear_w(&mut layer.feed_forward.w1, wm.take(&format!("{p}.feed_forward.w1.weight"), device)?);
+        set_linear_w(&mut layer.feed_forward.w2, wm.take(&format!("{p}.feed_forward.w2.weight"), device)?);
+        set_linear_w(&mut layer.feed_forward.w3, wm.take(&format!("{p}.feed_forward.w3.weight"), device)?);
     }
     Ok(())
 }
@@ -273,8 +335,12 @@ fn load_decoder_from_wm<B: Backend>(
 
 /// Load only the **encoder** weights from a safetensors file.
 ///
-/// Skips all decoder tensors — faster startup and ~half the memory when only
-/// embeddings are needed.
+/// Only encoder tensors are deserialized from the safetensors file — decoder
+/// tensors are skipped entirely, halving the bf16→f32 conversion work, peak
+/// memory, and drop cost compared to loading the full model.
+///
+/// Tensor data is moved (not cloned) into the burn model, avoiding an extra
+/// copy of every weight vector.
 ///
 /// Returns `(encoder, n_heads)`.  `n_heads` is inferred from the weight shape
 /// because `config.json` does not store it explicitly.
@@ -284,7 +350,7 @@ pub fn load_encoder_weights<B: Backend>(
     device:       &B::Device,
 ) -> anyhow::Result<(EncoderTransformer<B>, usize)> {
     let hidden_dim = cfg.ffn_hidden_dim();
-    let wm        = WeightMap::from_file(weights_path)?;
+    let mut wm    = WeightMap::from_file_filtered(weights_path, WeightFilter::Encoder)?;
     let n_heads   = wm.infer_n_heads(cfg.head_dim)?;
 
     let mut enc = EncoderTransformer::new(
@@ -292,7 +358,7 @@ pub fn load_encoder_weights<B: Backend>(
         cfg.n_layers, cfg.head_dim, n_heads, n_heads,
         hidden_dim, cfg.norm_eps, cfg.encoder_latent_downsample_factor, device,
     );
-    load_encoder_from_wm(&wm, &mut enc, device)?;
+    load_encoder_from_wm(&mut wm, &mut enc, device)?;
     Ok((enc, n_heads))
 }
 
@@ -305,7 +371,7 @@ pub fn load_decoder_weights<B: Backend>(
     device:       &B::Device,
 ) -> anyhow::Result<(DecoderTransformer<B>, usize)> {
     let hidden_dim = cfg.ffn_hidden_dim();
-    let wm        = WeightMap::from_file(weights_path)?;
+    let mut wm    = WeightMap::from_file(weights_path)?;
     let n_heads   = wm.infer_n_heads(cfg.head_dim)?;
 
     let mut dec = DecoderTransformer::new(
@@ -313,7 +379,7 @@ pub fn load_decoder_weights<B: Backend>(
         cfg.n_layers, cfg.head_dim, n_heads, n_heads,
         hidden_dim, cfg.norm_eps, device,
     );
-    load_decoder_from_wm(&wm, &mut dec, device)?;
+    load_decoder_from_wm(&mut wm, &mut dec, device)?;
     Ok((dec, n_heads))
 }
 
@@ -325,7 +391,7 @@ pub fn load_model<B: Backend>(
     device:       &B::Device,
 ) -> anyhow::Result<EncoderDecoder<B>> {
     let hidden_dim = cfg.ffn_hidden_dim();
-    let wm        = WeightMap::from_file(weights_path)?;
+    let mut wm    = WeightMap::from_file(weights_path)?;
     let n_heads   = wm.infer_n_heads(cfg.head_dim)?;
     println!("Detected n_heads = {n_heads}");
 
@@ -336,8 +402,8 @@ pub fn load_model<B: Backend>(
         cfg.stft_global_sigma as f32, device,
     );
 
-    load_encoder_from_wm(&wm, &mut model.encoder, device)?;
-    load_decoder_from_wm(&wm, &mut model.decoder, device)?;
+    load_encoder_from_wm(&mut wm, &mut model.encoder, device)?;
+    load_decoder_from_wm(&mut wm, &mut model.decoder, device)?;
 
     println!("Loaded {} weight tensors.", wm.tensors.len());
     Ok(model)
