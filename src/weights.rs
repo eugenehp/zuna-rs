@@ -40,6 +40,7 @@
 
 use std::collections::HashMap;
 use burn::prelude::*;
+use burn::module::{Param, ParamId};
 use half::bf16;
 use safetensors::SafeTensors;
 
@@ -195,7 +196,9 @@ fn set_linear_w<B: Backend>(
     w: Tensor<B, 2>,   // raw safetensors tensor [out, in]
 ) {
     // Transpose [out, in] → [in, out] for burn's Row layout.
-    linear.weight = linear.weight.clone().map(|_| w.transpose());
+    // Construct a fresh Param directly — avoids triggering lazy random init
+    // that burn's `.clone().map()` pattern would cause.
+    linear.weight = Param::initialized(ParamId::new(), w.transpose());
 }
 
 /// Assign weight + bias into a `burn::nn::Linear`.
@@ -204,15 +207,13 @@ fn set_linear_wb<B: Backend>(
     w: Tensor<B, 2>,   // raw safetensors tensor [out, in]
     b: Tensor<B, 1>,
 ) {
-    linear.weight = linear.weight.clone().map(|_| w.transpose());
-    if let Some(ref bias) = linear.bias {
-        linear.bias = Some(bias.clone().map(|_| b));
-    }
+    linear.weight = Param::initialized(ParamId::new(), w.transpose());
+    linear.bias = Some(Param::initialized(ParamId::new(), b));
 }
 
 /// Assign a 1-D weight into a `burn::nn::RmsNorm` (field: `gamma`).
 fn set_rmsnorm<B: Backend>(norm: &mut burn::nn::RmsNorm<B>, w: Tensor<B, 1>) {
-    norm.gamma = norm.gamma.clone().map(|_| w);
+    norm.gamma = Param::initialized(ParamId::new(), w);
 }
 
 // ── Internal per-component loaders ───────────────────────────────────────────
@@ -232,7 +233,7 @@ fn load_encoder_from_wm<B: Backend>(
     );
 
     let regs: Tensor<B, 2> = wm.take("encoder.registers", device)?;
-    enc.registers = enc.registers.clone().map(|_| regs);
+    enc.registers = Param::initialized(ParamId::new(), regs);
 
     let norm_w: Tensor<B, 1> = wm.take("encoder.norm.weight", device)?;
     set_rmsnorm(&mut enc.norm.inner, norm_w);
@@ -275,7 +276,7 @@ fn load_decoder_from_wm<B: Backend>(
     );
 
     let fc_w: Tensor<B, 2> = wm.take("decoder.t_embedder.weight", device)?;
-    dec.t_embedder.weight = dec.t_embedder.weight.clone().map(|_| fc_w);
+    dec.t_embedder.weight = Param::initialized(ParamId::new(), fc_w);
     set_linear_wb(
         &mut dec.t_embedder.proj,
         wm.take("decoder.t_embedder.proj.weight", device)?,
