@@ -7,8 +7,9 @@
 ///
 /// hidden_dim = 256 × ⌈int(2×4×dim/3) / 256⌉ = 2816 for dim=1024.
 use burn::prelude::*;
-use burn::nn::{Linear, LinearConfig};
+use burn::nn::Linear;
 use burn::tensor::activation::silu;
+use crate::model::linear_zeros;
 
 #[derive(Module, Debug)]
 pub struct FeedForward<B: Backend> {
@@ -19,11 +20,11 @@ pub struct FeedForward<B: Backend> {
 
 impl<B: Backend> FeedForward<B> {
     pub fn new(dim: usize, hidden_dim: usize, device: &B::Device) -> Self {
-        let nobias = |i, o| LinearConfig::new(i, o).with_bias(false).init(device);
+        let z = |i, o| linear_zeros(i, o, false, device);
         Self {
-            w1: nobias(dim, hidden_dim),
-            w2: nobias(hidden_dim, dim),
-            w3: nobias(dim, hidden_dim),
+            w1: z(dim, hidden_dim),
+            w2: z(hidden_dim, dim),
+            w3: z(dim, hidden_dim),
         }
     }
 

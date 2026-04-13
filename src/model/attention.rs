@@ -3,9 +3,10 @@
 /// Python: `Attention` in lingua/transformer.py.
 /// Single-sample path: full attention, no document mask needed.
 use burn::prelude::*;
-use burn::nn::{Linear, LinearConfig};
+use burn::nn::Linear;
 use burn::tensor::activation::softmax;
 use crate::model::rope::apply_rope;
+use crate::model::linear_zeros;
 
 #[derive(Module, Debug)]
 pub struct Attention<B: Backend> {
@@ -26,12 +27,12 @@ impl<B: Backend> Attention<B> {
         n_kv_heads: usize,
         device: &B::Device,
     ) -> Self {
-        let nobias = |i, o| LinearConfig::new(i, o).with_bias(false).init(device);
+        let z = |i, o| linear_zeros(i, o, false, device);
         Self {
-            wq: nobias(dim, n_heads    * head_dim),
-            wk: nobias(dim, n_kv_heads * head_dim),
-            wv: nobias(dim, n_kv_heads * head_dim),
-            wo: nobias(n_heads * head_dim, dim),
+            wq: z(dim, n_heads    * head_dim),
+            wk: z(dim, n_kv_heads * head_dim),
+            wv: z(dim, n_kv_heads * head_dim),
+            wo: z(n_heads * head_dim, dim),
             n_heads, n_kv_heads, head_dim,
         }
     }

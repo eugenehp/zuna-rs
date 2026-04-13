@@ -8,7 +8,8 @@
 ///   for DecoderBlock: h = block(h, y, t, freqs, freqs)
 ///   return output(AdaRMSNorm(h, t)) [1, S, input_dim]
 use burn::prelude::*;
-use burn::nn::{Linear, LinearConfig};
+use burn::nn::Linear;
+use crate::model::linear_zeros;
 use crate::model::norm::AdaRMSNorm;
 use crate::model::conditioner::FourierConditioner;
 use crate::model::decoder_block::DecoderBlock;
@@ -44,13 +45,12 @@ impl<B: Backend> DecoderTransformer<B> {
             ))
             .collect();
         Self {
-            tok_embeddings: LinearConfig::new(input_dim, dim).with_bias(true).init(device),
+            tok_embeddings: linear_zeros(input_dim, dim, true, device),
             t_embedder:     FourierConditioner::new(t_dim, device),
-            // Python: encoder_proj = nn.Linear(encoder_output_dim, dim, bias=True)
-            encoder_proj:   LinearConfig::new(encoder_dim, dim).with_bias(true).init(device),
+            encoder_proj:   linear_zeros(encoder_dim, dim, true, device),
             layers,
             norm:   AdaRMSNorm::new(t_dim, dim, norm_eps, device),
-            output: LinearConfig::new(dim, input_dim).with_bias(false).init(device),
+            output: linear_zeros(dim, input_dim, false, device),
         }
     }
 

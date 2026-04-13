@@ -5,7 +5,8 @@
 /// for the decoder (conditioned on timestep embedding `c`).
 
 use burn::prelude::*;
-use burn::nn::{Linear, LinearConfig, RmsNorm, RmsNormConfig};
+use burn::nn::{Linear, RmsNorm, RmsNormConfig};
+use crate::model::linear_zeros;
 
 // ── Plain RMSNorm wrapper (maps the API used in the rest of our code) ─────────
 
@@ -51,7 +52,7 @@ pub struct AdaRMSNorm<B: Backend> {
 impl<B: Backend> AdaRMSNorm<B> {
     pub fn new(emb_dim: usize, dim: usize, eps: f64, device: &B::Device) -> Self {
         Self {
-            weight: LinearConfig::new(emb_dim, dim).with_bias(true).init(device),
+            weight: linear_zeros(emb_dim, dim, true, device),
             eps,
         }
     }

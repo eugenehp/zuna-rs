@@ -12,7 +12,8 @@
 /// with shape [32, 1] (output_dim//2 = 64//2 = 32).
 use burn::prelude::*;
 use burn::module::{Param, ParamId};
-use burn::nn::{Linear, LinearConfig};
+use burn::nn::Linear;
+use crate::model::linear_zeros;
 
 #[derive(Module, Debug)]
 pub struct FourierConditioner<B: Backend> {
@@ -31,9 +32,7 @@ impl<B: Backend> FourierConditioner<B> {
                 ParamId::new(),
                 Tensor::zeros([half_dim, 1], device),
             ),
-            proj: LinearConfig::new(output_dim, output_dim)
-                .with_bias(true)
-                .init(device),
+            proj: linear_zeros(output_dim, output_dim, true, device),
             half_dim,
         }
     }

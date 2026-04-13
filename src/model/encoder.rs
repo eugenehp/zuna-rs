@@ -11,7 +11,8 @@
 ///   6. Bottleneck: "mmd" = passthrough at inference
 use burn::prelude::*;
 use burn::module::{Param, ParamId};
-use burn::nn::{Linear, LinearConfig};
+use burn::nn::Linear;
+use crate::model::linear_zeros;
 use crate::model::norm::RMSNorm;
 use crate::model::encoder_block::EncoderBlock;
 use crate::model::rope::RotaryEmbedding;
@@ -47,15 +48,14 @@ impl<B: Backend> EncoderTransformer<B> {
             ))
             .collect();
         Self {
-            tok_embeddings: LinearConfig::new(input_dim, dim)
-                .with_bias(true).init(device),
+            tok_embeddings: linear_zeros(input_dim, dim, true, device),
             registers: Param::initialized(
                 ParamId::new(),
                 Tensor::zeros([1, input_dim], device),
             ),
             layers,
             norm:   RMSNorm::new(dim, norm_eps, device),
-            output: LinearConfig::new(dim, output_dim).with_bias(false).init(device),
+            output: linear_zeros(dim, output_dim, false, device),
             downsample_factor,
         }
     }
