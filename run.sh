@@ -69,6 +69,9 @@ export RAYON_NUM_THREADS="$NCPUS"
 export VECLIB_MAXIMUM_THREADS="$NCPUS"   # Apple Accelerate
 export OMP_NUM_THREADS="$NCPUS"          # OpenBLAS / OpenMP
 
+# ── Optimise for the host CPU (NEON on Apple Silicon, AVX2 on Intel) ──────────
+export RUSTFLAGS="${RUSTFLAGS:-} -C target-cpu=native"
+
 # ── Sanity checks ─────────────────────────────────────────────────────────────
 step "Environment"
 [ -f "$FIF_FILE" ] || die "FIF not found: $(relpath "$FIF_FILE")"

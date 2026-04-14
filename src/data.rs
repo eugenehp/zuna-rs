@@ -119,10 +119,18 @@ pub fn load_batch<B: Backend>(
         let v = st.tensor("n_samples")?;
         match v.dtype() {
             // preprocess_fif.py writes I32; infer binary writes F32
-            safetensors::Dtype::I32 =>
-                i32::from_le_bytes(v.data()[..4].try_into().unwrap()) as usize,
-            safetensors::Dtype::F32 =>
-                f32::from_le_bytes(v.data()[..4].try_into().unwrap()) as usize,
+            safetensors::Dtype::I32 => {
+                let b: [u8; 4] = v.data().get(..4)
+                    .and_then(|s| s.try_into().ok())
+                    .ok_or_else(|| anyhow::anyhow!("n_samples I32 too short"))?;
+                i32::from_le_bytes(b) as usize
+            }
+            safetensors::Dtype::F32 => {
+                let b: [u8; 4] = v.data().get(..4)
+                    .and_then(|s| s.try_into().ok())
+                    .ok_or_else(|| anyhow::anyhow!("n_samples F32 too short"))?;
+                f32::from_le_bytes(b) as usize
+            }
             other => anyhow::bail!("unexpected dtype for n_samples: {:?}", other),
         }
     };
@@ -292,6 +300,144 @@ pub fn load_from_fif<B: Backend>(
     };
 
     Ok((batches, info))
+}
+
+// ── 9. CPU-only FIF preprocessing (no burn tensors — Send-safe) ──────────────
+
+/// Preprocessed epoch data in plain Vecs (no burn tensors).
+/// Safe to produce on any thread and convert to tensors later.
+pub struct PreprocessedEpoch {
+    /// EEG token data, row-major `[S, tf]` float32.
+    pub eeg_tokens: Vec<f32>,
+    /// Token indices, row-major `[S, 4]` int32.
+    pub tok_idx: Vec<i32>,
+    /// Channel positions in metres, row-major `[C, 3]` float32.
+    pub chan_pos: Vec<f32>,
+    /// Number of tokens S = n_channels × tc.
+    pub s: usize,
+    /// Fine time points per token.
+    pub tf: usize,
+    /// Number of EEG channels.
+    pub n_channels: usize,
+    /// Coarse time steps per epoch.
+    pub tc: usize,
+}
+
+/// Result of CPU-only FIF preprocessing.
+pub struct PreprocessedFif {
+    pub epochs: Vec<PreprocessedEpoch>,
+    pub info: FifInfo,
+}
+
+/// Preprocess a FIF file entirely on the CPU without creating burn tensors.
+///
+/// This is the parallel-safe counterpart of [`load_from_fif`]: it returns
+/// plain `Vec<f32>` / `Vec<i32>` buffers that can be produced on a rayon
+/// worker and later converted to tensors on the main thread.
+pub fn preprocess_fif_cpu(
+    path:      &std::path::Path,
+    data_cfg:  &DataConfig,
+    data_norm: f32,
+) -> anyhow::Result<PreprocessedFif> {
+    use exg::{fiff::raw::open_raw, PipelineConfig};
+    use ndarray::Array2;
+
+    let raw_fif     = open_raw(path)?;
+    let src_sfreq   = raw_fif.info.sfreq as f32;
+    let n_ch        = raw_fif.info.n_chan;
+    let n_times_raw = raw_fif.n_times();
+    let duration_s  = n_times_raw as f32 / src_sfreq;
+
+    let ch_names: Vec<String> = raw_fif.info.chs.iter().map(|ch| ch.name.clone()).collect();
+    let ch_pos_mm: Vec<[f32; 3]> = raw_fif.info.chs.iter()
+        .map(|ch| [ch.loc[0] * 1000.0, ch.loc[1] * 1000.0, ch.loc[2] * 1000.0])
+        .collect();
+    let pos_flat: Vec<f32> = raw_fif.info.chs.iter()
+        .flat_map(|ch| [ch.loc[0], ch.loc[1], ch.loc[2]])
+        .collect();
+    let chan_pos_arr = Array2::from_shape_vec((n_ch, 3), pos_flat)?;
+
+    let data_f64 = raw_fif.read_all_data()?;
+    let data_f32: Array2<f32> = data_f64.mapv(|v| v as f32);
+
+    let preproc_cfg = PipelineConfig { data_norm, ..PipelineConfig::default() };
+    let exg_epochs = exg::preprocess(data_f32, chan_pos_arr, src_sfreq, &preproc_cfg)?;
+    let n_epochs = exg_epochs.len();
+
+    // Discretize + chop using temporary ndarray math (no burn tensors).
+    let tf = data_cfg.num_fine_time_pts;
+    let mut epochs = Vec::with_capacity(n_epochs);
+
+    for (eeg_arr, pos_arr) in exg_epochs {
+        let (c, t) = eeg_arr.dim();
+        let tc = t / tf;
+
+        // Discretize channel positions to bins [0, num_bins-1].
+        let bins = data_cfg.num_bins as f32;
+        let disc: Vec<i32> = pos_arr.iter().enumerate().map(|(i, &v)| {
+            let axis = i % 3;
+            let lo = data_cfg.xyz_min[axis];
+            let hi = data_cfg.xyz_max[axis];
+            let norm = (v - lo) / (hi - lo);
+            (norm * bins).min(bins - 1.0).max(0.0) as i32
+        }).collect();
+
+        // Chop and reshape: [C, T] → [C*tc, tf]
+        // Also build tok_idx [S, 4] = [disc_x, disc_y, disc_z, t_coarse]
+        let s = c * tc;
+        let mut eeg_tokens = vec![0f32; s * tf];
+        let mut tok_idx = vec![0i32; s * 4];
+
+        for ch in 0..c {
+            for ti in 0..tc {
+                let token = ch * tc + ti;
+                // Copy tf samples from eeg_arr[ch, ti*tf .. (ti+1)*tf]
+                for f in 0..tf {
+                    eeg_tokens[token * tf + f] = eeg_arr[[ch, ti * tf + f]];
+                }
+                // tok_idx = [x_bin, y_bin, z_bin, t_coarse]
+                tok_idx[token * 4]     = disc[ch * 3];
+                tok_idx[token * 4 + 1] = disc[ch * 3 + 1];
+                tok_idx[token * 4 + 2] = disc[ch * 3 + 2];
+                tok_idx[token * 4 + 3] = ti as i32;
+            }
+        }
+
+        let chan_pos: Vec<f32> = pos_arr.iter().copied().collect();
+
+        epochs.push(PreprocessedEpoch { eeg_tokens, tok_idx, chan_pos, s, tf, n_channels: c, tc });
+    }
+
+    let info = FifInfo {
+        ch_names, ch_pos_mm, sfreq: src_sfreq, n_times_raw, duration_s,
+        n_epochs, target_sfreq: preproc_cfg.target_sfreq, epoch_dur_s: preproc_cfg.epoch_dur,
+    };
+
+    Ok(PreprocessedFif { epochs, info })
+}
+
+/// Convert a [`PreprocessedEpoch`] to a burn [`InputBatch`] on the given device.
+pub fn preprocessed_to_batch<B: Backend>(
+    ep:     PreprocessedEpoch,
+    device: &B::Device,
+) -> InputBatch<B> {
+    let s  = ep.s;
+    let tf = ep.tf;
+    let c  = ep.n_channels;
+
+    let encoder_input = Tensor::<B, 2>::from_data(
+        TensorData::new(ep.eeg_tokens, vec![s, tf]), device,
+    ).unsqueeze_dim::<3>(0); // [1, S, tf]
+
+    let tok_idx = Tensor::<B, 2, Int>::from_data(
+        TensorData::new(ep.tok_idx, vec![s, 4]), device,
+    );
+
+    let chan_pos = Tensor::<B, 2>::from_data(
+        TensorData::new(ep.chan_pos, vec![c, 3]), device,
+    );
+
+    InputBatch { encoder_input, tok_idx, chan_pos, n_channels: c, tc: ep.tc }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

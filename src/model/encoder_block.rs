@@ -34,9 +34,9 @@ impl<B: Backend> EncoderBlock<B> {
         }
     }
 
-    /// x:        [1, S, dim]
-    /// freqs_4d: [S, head_dim/2, 2, 2]
-    /// Returns:  [1, S, dim]
+    /// x:        [B, S, dim]
+    /// freqs_4d: [S, head_dim/2, 2, 2]  (broadcasts over B)
+    /// Returns:  [B, S, dim]
     pub fn forward(&self, x: Tensor<B, 3>, freqs_4d: Tensor<B, 4>) -> Tensor<B, 3> {
         let h = x.clone()
             + self.attention.forward(self.attention_norm.forward(x.clone()), freqs_4d.clone());

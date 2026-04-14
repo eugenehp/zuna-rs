@@ -18,7 +18,15 @@ use clap::Parser;
 use zuna_rs::ZunaInference;
 
 // ── Backend ───────────────────────────────────────────────────────────────────
-#[cfg(all(feature = "wgpu", not(feature = "ndarray")))]
+#[cfg(all(feature = "wgpu-f16", not(feature = "ndarray"), not(feature = "wgpu")))]
+mod backend {
+    pub type B = burn::backend::wgpu::Wgpu<half::f16, i32, u32>;
+    pub type Device = burn::backend::wgpu::WgpuDevice;
+    pub fn device() -> Device { Device::DefaultDevice }
+    pub const NAME: &str = "GPU (wgpu f16 / Metal or Vulkan)";
+}
+
+#[cfg(all(feature = "wgpu", not(feature = "ndarray"), not(feature = "wgpu-f16")))]
 mod backend {
     pub use burn::backend::{Wgpu as B, wgpu::WgpuDevice as Device};
     pub fn device() -> Device { Device::DefaultDevice }
@@ -76,6 +84,10 @@ struct Args {
     #[arg(long, default_value_t = 10.0)]
     data_norm: f32,
 
+    /// Number of CPU threads for NdArray backend (0 or omit = all cores).
+    #[arg(long, env = "RAYON_NUM_THREADS")]
+    threads: Option<usize>,
+
     /// Print model config, electrode positions, per-epoch stats.
     #[arg(long, short = 'v')]
     verbose: bool,
@@ -84,10 +96,11 @@ struct Args {
 // ── Main ──────────────────────────────────────────────────────────────────────
 fn main() -> anyhow::Result<()> {
     let args  = Args::parse();
+    let n_threads = zuna_rs::init_threads(args.threads);
     let t0    = Instant::now();
     let dev   = device();
 
-    println!("Backend : {}", backend::NAME);
+    println!("Backend : {}  ({n_threads} threads)", backend::NAME);
 
     // ── Load model ────────────────────────────────────────────────────────────
     let (zuna, ms_weights) = ZunaInference::<B>::load(

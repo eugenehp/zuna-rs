@@ -64,6 +64,32 @@
 //! are therefore already in the regularised latent space and can be used
 //! directly for downstream tasks.
 
+// ── Thread configuration ─────────────────────────────────────────────────────
+
+/// Configure the global Rayon thread pool used by the NdArray backend.
+///
+/// Call this **once**, before any model operations.  If `n` is `None` or `0`,
+/// Rayon uses all logical CPUs (its default).
+///
+/// Returns the actual number of threads in the pool.
+///
+/// # Example
+/// ```rust,ignore
+/// let n = zuna_rs::init_threads(Some(4));
+/// println!("Using {n} threads");
+/// ```
+pub fn init_threads(n: Option<usize>) -> usize {
+    let mut builder = rayon::ThreadPoolBuilder::new();
+    if let Some(count) = n {
+        if count > 0 {
+            builder = builder.num_threads(count);
+        }
+    }
+    // build_global returns Err if already initialised — that's fine.
+    let _ = builder.build_global();
+    rayon::current_num_threads()
+}
+
 // ── Internal modules ─────────────────────────────────────────────────────────
 
 pub mod channel_positions;
@@ -95,7 +121,7 @@ pub use decoder::ZunaDecoder;
 pub use config::{ModelConfig, DataConfig, InferConfig};
 
 // Data types needed for the lower-level API
-pub use data::{InputBatch, FifInfo};
+pub use data::{InputBatch, FifInfo, PreprocessedEpoch, PreprocessedFif, preprocess_fif_cpu, preprocessed_to_batch};
 
 // Channel position lookup
 pub use channel_positions::{channel_xyz, MontageLayout, montage_channels, nearest_channel, normalise};

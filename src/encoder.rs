@@ -287,6 +287,79 @@ impl<B: Backend> ZunaEncoder<B> {
         )
     }
 
+    // ── Multi-file parallel API ────────────────────────────────────────────────
+
+    /// Encode multiple FIF files in parallel.
+    ///
+    /// FIF I/O and preprocessing run concurrently on the Rayon thread pool,
+    /// then all epochs are encoded in a single batched forward pass.
+    ///
+    /// Returns one [`EncodingResult`] per file, in the same order as the input.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let paths: Vec<PathBuf> = glob::glob("data/*.fif")?.collect();
+    /// let results = enc.encode_fif_parallel(&paths, 10.0)?;
+    /// for (path, result) in paths.iter().zip(&results) {
+    ///     println!("{}: {} epochs", path.display(), result.epochs.len());
+    /// }
+    /// ```
+    pub fn encode_fif_parallel(
+        &self,
+        fif_paths: &[impl AsRef<Path> + Sync],
+        data_norm: f32,
+    ) -> anyhow::Result<Vec<EncodingResult>> {
+        use rayon::prelude::*;
+        use crate::data::{preprocess_fif_cpu, preprocessed_to_batch, PreprocessedFif};
+
+        let data_cfg = self.data_cfg.clone();
+
+        // Phase 1: parallel FIF preprocessing (no burn tensors — all CPU).
+        let t_pp = Instant::now();
+        let preprocessed: Vec<anyhow::Result<PreprocessedFif>> = fif_paths
+            .par_iter()
+            .map(|p| preprocess_fif_cpu(p.as_ref(), &data_cfg, data_norm))
+            .collect();
+        let ms_preproc = t_pp.elapsed().as_secs_f64() * 1000.0;
+
+        // Unwrap results, tracking which file each epoch came from.
+        let mut all_batches: Vec<InputBatch<B>> = Vec::new();
+        let mut file_epoch_counts: Vec<usize> = Vec::new();
+        let mut fif_infos: Vec<FifInfo> = Vec::new();
+
+        for (i, result) in preprocessed.into_iter().enumerate() {
+            let pfif = result.with_context(|| {
+                format!("preprocessing file {}", fif_paths[i].as_ref().display())
+            })?;
+            file_epoch_counts.push(pfif.epochs.len());
+            fif_infos.push(pfif.info);
+            for ep in pfif.epochs {
+                all_batches.push(preprocessed_to_batch(ep, &self.device));
+            }
+        }
+
+        // Phase 2: batched encoding (single forward pass when shapes match).
+        let t_enc = Instant::now();
+        let all_embeddings = self.encode_inputs(all_batches)?;
+        let ms_encode = t_enc.elapsed().as_secs_f64() * 1000.0;
+
+        // Phase 3: split results back per file.
+        let mut emb_iter = all_embeddings.into_iter();
+        let results = file_epoch_counts.into_iter().zip(fif_infos)
+            .map(|(count, info)| {
+                let epochs: Vec<EpochEmbedding> = (&mut emb_iter).take(count).collect();
+                EncodingResult {
+                    epochs,
+                    fif_info: Some(info),
+                    ms_preproc,
+                    ms_encode,
+                }
+            })
+            .collect();
+
+        Ok(results)
+    }
+
     // ── Lower-level API (benchmark / export) ─────────────────────────────────
 
     /// Run the FIF preprocessing pipeline and return raw [`InputBatch`]es
@@ -319,7 +392,81 @@ impl<B: Backend> ZunaEncoder<B> {
         &self,
         batches: Vec<InputBatch<B>>,
     ) -> anyhow::Result<Vec<EpochEmbedding>> {
-        batches.into_iter().map(|b| self.encode_one(b)).collect()
+        if batches.len() <= 1 {
+            return batches.into_iter().map(|b| self.encode_one(b)).collect();
+        }
+
+        // Check if all batches share the same tok_idx shape (same recording).
+        // If so, we can batch them for much better BLAS/GPU throughput.
+        let first_s = batches[0].encoder_input.dims()[1];
+        let all_same = batches.iter().all(|b| b.encoder_input.dims()[1] == first_s);
+
+        if all_same {
+            self.encode_batched(batches)
+        } else {
+            batches.into_iter().map(|b| self.encode_one(b)).collect()
+        }
+    }
+
+    /// Encode multiple epochs in a single batched forward pass.
+    /// All epochs must have the same sequence length S (same channel layout).
+    fn encode_batched(
+        &self,
+        batches: Vec<InputBatch<B>>,
+    ) -> anyhow::Result<Vec<EpochEmbedding>> {
+        let n = batches.len();
+
+        // Save per-epoch metadata before consuming
+        let metadata: Vec<_> = batches.iter().map(|b| {
+            (b.n_channels, b.tc, b.tok_idx.clone(), b.chan_pos.clone())
+        }).collect();
+
+        // Stack encoder inputs: [1, S, d] × N → [N, S, d]
+        let inputs: Vec<Tensor<B, 3>> = batches.into_iter()
+            .map(|b| b.encoder_input)
+            .collect();
+        let stacked = Tensor::cat(inputs, 0); // [N, S, d]
+
+        // tok_idx is shared (same recording) — use first
+        let tok_idx = metadata[0].2.clone();
+
+        // Batched encoder forward: [N, S, d] → [N, S, output_dim]
+        let enc_out = self.encoder.forward(stacked, tok_idx, &self.rope);
+        let [_, _s, _output_dim] = enc_out.dims();
+
+        // Split back into per-epoch results
+        let per_epoch: Vec<Tensor<B, 3>> = (0..n)
+            .map(|i| enc_out.clone().narrow(0, i, 1)) // [1, S, output_dim]
+            .collect();
+
+        per_epoch.into_iter().zip(metadata.into_iter())
+            .map(|(enc, (n_channels, tc, tok_idx_saved, chan_pos_saved))| {
+                let [_, s, od] = enc.dims();
+                let embeddings = enc.squeeze::<2>().into_data()
+                    .convert::<f32>().to_vec::<f32>()
+                    .map_err(|e| anyhow::anyhow!("embedding→vec: {e:?}"))?;
+
+                let tok_idx_data = tok_idx_saved.into_data();
+                let tok_idx: Vec<i64> = tok_idx_data
+                    .to_vec::<i64>()
+                    .or_else(|_| tok_idx_data.to_vec::<i32>()
+                        .map(|v| v.into_iter().map(|x| x as i64).collect()))
+                    .map_err(|e| anyhow::anyhow!("tok_idx→vec: {e:?}"))?;
+
+                let chan_pos = chan_pos_saved.into_data()
+                    .convert::<f32>().to_vec::<f32>()
+                    .map_err(|e| anyhow::anyhow!("chan_pos→vec: {e:?}"))?;
+
+                Ok(EpochEmbedding {
+                    embeddings,
+                    shape: vec![s, od],
+                    tok_idx,
+                    chan_pos,
+                    n_channels,
+                    tc,
+                })
+            })
+            .collect()
     }
 
     fn encode_one(&self, batch: InputBatch<B>) -> anyhow::Result<EpochEmbedding> {

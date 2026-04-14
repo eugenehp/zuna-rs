@@ -168,9 +168,11 @@ impl WeightMap {
     /// Infer the number of attention heads from the wq weight shape.
     /// wq is stored as [n_heads * head_dim, dim] (PyTorch out×in convention).
     pub fn infer_n_heads(&self, head_dim: usize) -> anyhow::Result<usize> {
+        anyhow::ensure!(head_dim > 0, "head_dim must be > 0");
         let key = "encoder.layers.0.attention.wq.weight";
         let (_, shape) = self.tensors.get(key)
             .ok_or_else(|| anyhow::anyhow!("key not found for n_heads inference: {key}"))?;
+        anyhow::ensure!(shape.len() >= 2, "wq weight must be 2-D, got shape {shape:?}");
         // shape[0] = n_heads * head_dim  (PyTorch [out, in])
         Ok(shape[0] / head_dim)
     }

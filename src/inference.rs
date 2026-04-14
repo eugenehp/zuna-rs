@@ -275,51 +275,124 @@ impl<B: Backend> ZunaInference<B> {
         Ok(EncodingResult { epochs, fif_info: None, ms_preproc, ms_encode })
     }
 
+    /// Encode multiple FIF files in parallel (preprocessing on Rayon,
+    /// then batched encoder forward pass).
+    ///
+    /// Returns one [`EncodingResult`] per file.
+    pub fn encode_fif_parallel(
+        &self,
+        fif_paths: &[impl AsRef<Path> + Sync],
+        data_norm: f32,
+    ) -> anyhow::Result<Vec<EncodingResult>> {
+        use rayon::prelude::*;
+        use crate::data::{preprocess_fif_cpu, preprocessed_to_batch, PreprocessedFif};
+
+        let data_cfg = self.data_cfg.clone();
+
+        let t_pp = Instant::now();
+        let preprocessed: Vec<anyhow::Result<PreprocessedFif>> = fif_paths
+            .par_iter()
+            .map(|p| preprocess_fif_cpu(p.as_ref(), &data_cfg, data_norm))
+            .collect();
+        let ms_preproc = t_pp.elapsed().as_secs_f64() * 1000.0;
+
+        let mut all_batches: Vec<InputBatch<B>> = Vec::new();
+        let mut file_epoch_counts: Vec<usize> = Vec::new();
+        let mut fif_infos: Vec<FifInfo> = Vec::new();
+
+        for (i, result) in preprocessed.into_iter().enumerate() {
+            let pfif = result.with_context(|| {
+                format!("preprocessing file {}", fif_paths[i].as_ref().display())
+            })?;
+            file_epoch_counts.push(pfif.epochs.len());
+            fif_infos.push(pfif.info);
+            for ep in pfif.epochs {
+                all_batches.push(preprocessed_to_batch(ep, &self.device));
+            }
+        }
+
+        let t_enc = Instant::now();
+        let all_embeddings = self.encode_inputs(all_batches)?;
+        let ms_encode = t_enc.elapsed().as_secs_f64() * 1000.0;
+
+        let mut emb_iter = all_embeddings.into_iter();
+        let results = file_epoch_counts.into_iter().zip(fif_infos)
+            .map(|(count, info)| {
+                let epochs: Vec<EpochEmbedding> = (&mut emb_iter).take(count).collect();
+                EncodingResult { epochs, fif_info: Some(info), ms_preproc, ms_encode }
+            })
+            .collect();
+
+        Ok(results)
+    }
+
     fn encode_inputs(
         &self,
         batches: Vec<InputBatch<B>>,
     ) -> anyhow::Result<Vec<EpochEmbedding>> {
-        batches.into_iter().map(|batch| {
-            let n_channels    = batch.n_channels;
-            let tc            = batch.tc;
-            let tok_idx_saved = batch.tok_idx.clone();
-            let chan_pos_saved = batch.chan_pos.clone();
+        if batches.len() <= 1 {
+            return batches.into_iter().map(|batch| self.encode_one(batch)).collect();
+        }
+        // Batch all epochs with the same sequence length into a single forward pass.
+        let first_s = batches[0].encoder_input.dims()[1];
+        let all_same = batches.iter().all(|b| b.encoder_input.dims()[1] == first_s);
+        if all_same {
+            self.encode_batched(batches)
+        } else {
+            batches.into_iter().map(|b| self.encode_one(b)).collect()
+        }
+    }
 
-            // Encoder forward: [1, S, output_dim]
-            let enc_out = self.model.encoder.forward(
-                batch.encoder_input,
-                batch.tok_idx,
-                &self.rope,
-            );
-            let [_, s, output_dim] = enc_out.dims();
+    fn encode_one(&self, batch: InputBatch<B>) -> anyhow::Result<EpochEmbedding> {
+        let n_channels    = batch.n_channels;
+        let tc            = batch.tc;
+        let tok_idx_saved = batch.tok_idx.clone();
+        let chan_pos_saved = batch.chan_pos.clone();
 
-            let embeddings = enc_out
-                .squeeze::<2>()
-                .into_data()
-                .to_vec::<f32>()
-                .map_err(|e| anyhow::anyhow!("embedding→vec: {e:?}"))?;
+        let enc_out = self.model.encoder.forward(
+            batch.encoder_input, batch.tok_idx, &self.rope,
+        );
+        let [_, s, output_dim] = enc_out.dims();
+        let embeddings = enc_out.squeeze::<2>().into_data()
+            .convert::<f32>().to_vec::<f32>().map_err(|e| anyhow::anyhow!("embedding→vec: {e:?}"))?;
+        let tok_idx_data = tok_idx_saved.into_data();
+        let tok_idx: Vec<i64> = tok_idx_data.to_vec::<i64>()
+            .or_else(|_| tok_idx_data.to_vec::<i32>()
+                .map(|v| v.into_iter().map(|x| x as i64).collect()))
+            .map_err(|e| anyhow::anyhow!("tok_idx→vec: {e:?}"))?;
+        let chan_pos = chan_pos_saved.into_data()
+            .convert::<f32>().to_vec::<f32>().map_err(|e| anyhow::anyhow!("chan_pos→vec: {e:?}"))?;
+        Ok(EpochEmbedding { embeddings, shape: vec![s, output_dim], tok_idx, chan_pos, n_channels, tc })
+    }
 
-            // NdArray backend stores Int as i64; wgpu backend stores Int as i32.
-            let tok_idx_data = tok_idx_saved.into_data();
-            let tok_idx: Vec<i64> = tok_idx_data
-                .to_vec::<i64>()
+    fn encode_batched(&self, batches: Vec<InputBatch<B>>) -> anyhow::Result<Vec<EpochEmbedding>> {
+        let n = batches.len();
+        let metadata: Vec<_> = batches.iter().map(|b| {
+            (b.n_channels, b.tc, b.tok_idx.clone(), b.chan_pos.clone())
+        }).collect();
+
+        let inputs: Vec<Tensor<B, 3>> = batches.into_iter().map(|b| b.encoder_input).collect();
+        let stacked = Tensor::cat(inputs, 0); // [N, S, d]
+        let tok_idx = metadata[0].2.clone();
+
+        let enc_out = self.model.encoder.forward(stacked, tok_idx, &self.rope);
+
+        (0..n).map(|i| {
+            let enc = enc_out.clone().narrow(0, i, 1);
+            let [_, s, od] = enc.dims();
+            let (n_channels, tc, ref tok_idx_saved, ref chan_pos_saved) = metadata[i];
+
+            let embeddings = enc.squeeze::<2>().into_data()
+                .to_vec::<f32>().map_err(|e| anyhow::anyhow!("embedding→vec: {e:?}"))?;
+            let tok_idx_data = tok_idx_saved.clone().into_data();
+            let tok_idx: Vec<i64> = tok_idx_data.to_vec::<i64>()
                 .or_else(|_| tok_idx_data.to_vec::<i32>()
                     .map(|v| v.into_iter().map(|x| x as i64).collect()))
                 .map_err(|e| anyhow::anyhow!("tok_idx→vec: {e:?}"))?;
+            let chan_pos = chan_pos_saved.clone().into_data()
+                .to_vec::<f32>().map_err(|e| anyhow::anyhow!("chan_pos→vec: {e:?}"))?;
 
-            let chan_pos = chan_pos_saved
-                .into_data()
-                .to_vec::<f32>()
-                .map_err(|e| anyhow::anyhow!("chan_pos→vec: {e:?}"))?;
-
-            Ok(EpochEmbedding {
-                embeddings,
-                shape: vec![s, output_dim],
-                tok_idx,
-                chan_pos,
-                n_channels,
-                tc,
-            })
+            Ok(EpochEmbedding { embeddings, shape: vec![s, od], tok_idx, chan_pos, n_channels, tc })
         }).collect()
     }
 
@@ -408,7 +481,7 @@ impl<B: Backend> ZunaInference<B> {
         );
         let recon = recon.mul_scalar(data_norm);
         let shape         = recon.dims().to_vec();
-        let reconstructed = recon.into_data().to_vec::<f32>()
+        let reconstructed = recon.into_data().convert::<f32>().to_vec::<f32>()
             .map_err(|e| anyhow::anyhow!("recon→vec: {e:?}"))?;
         Ok(EpochOutput { reconstructed, shape, chan_pos: ep.chan_pos.clone(), n_channels: ep.n_channels })
     }
@@ -437,9 +510,9 @@ impl<B: Backend> ZunaInference<B> {
             let recon = recon.mul_scalar(data_norm);
 
             let shape         = recon.dims().to_vec();
-            let reconstructed = recon.into_data().to_vec::<f32>()
+            let reconstructed = recon.into_data().convert::<f32>().to_vec::<f32>()
                 .map_err(|e| anyhow::anyhow!("tensor→vec: {e:?}"))?;
-            let chan_pos = batch.chan_pos.into_data().to_vec::<f32>()
+            let chan_pos = batch.chan_pos.into_data().convert::<f32>().to_vec::<f32>()
                 .map_err(|e| anyhow::anyhow!("chan_pos→vec: {e:?}"))?;
 
             Ok(EpochOutput { reconstructed, shape, chan_pos, n_channels: batch.n_channels })

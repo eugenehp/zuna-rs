@@ -34,8 +34,10 @@ use zuna_rs::ZunaInference;
 enum Device {
     /// CPU (NdArray + Rayon/BLAS).  Default, requires `--features ndarray`.
     Cpu,
-    /// GPU (wgpu).  Requires `--no-default-features --features wgpu`.
+    /// GPU (wgpu f32).  Requires `--no-default-features --features wgpu`.
     Gpu,
+    /// GPU (wgpu f16).  Requires `--no-default-features --features wgpu-f16`.
+    GpuF16,
 }
 
 #[derive(Parser, Debug)]
@@ -110,6 +112,10 @@ struct Args {
     #[arg(long, default_value_t = 10.0)]
     data_norm: f32,
 
+    /// Number of CPU threads for NdArray backend (0 or omit = all cores).
+    #[arg(long, env = "RAYON_NUM_THREADS")]
+    threads: Option<usize>,
+
     /// Verbose step-by-step output with per-epoch timing.
     #[arg(long, short = 'v')]
     verbose: bool,
@@ -123,9 +129,12 @@ struct Args {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+    let n_threads = zuna_rs::init_threads(args.threads);
+    println!("Threads  : {n_threads}");
     match args.device {
-        Device::Cpu => run_cpu(args),
-        Device::Gpu => run_gpu(args),
+        Device::Cpu    => run_cpu(args),
+        Device::Gpu    => run_gpu(args),
+        Device::GpuF16 => run_gpu_f16(args),
     }
 }
 
@@ -141,14 +150,24 @@ fn run_cpu(_: Args) -> anyhow::Result<()> {
     anyhow::bail!("CPU backend not compiled — rebuild with `--features ndarray`")
 }
 
-#[cfg(feature = "wgpu")]
+#[cfg(any(feature = "wgpu", feature = "wgpu-f16"))]
 fn run_gpu(args: Args) -> anyhow::Result<()> {
     use burn::backend::{wgpu::WgpuDevice, Wgpu};
-    run::<Wgpu>(WgpuDevice::DefaultDevice, "GPU (wgpu / Metal or Vulkan)", args)
+    run::<Wgpu>(WgpuDevice::DefaultDevice, "GPU (wgpu f32 / Metal or Vulkan)", args)
 }
-#[cfg(not(feature = "wgpu"))]
+#[cfg(not(any(feature = "wgpu", feature = "wgpu-f16")))]
 fn run_gpu(_: Args) -> anyhow::Result<()> {
     anyhow::bail!("GPU backend not compiled — rebuild with `--no-default-features --features wgpu`")
+}
+
+#[cfg(any(feature = "wgpu-f16", feature = "wgpu"))]
+fn run_gpu_f16(args: Args) -> anyhow::Result<()> {
+    type B = burn::backend::wgpu::Wgpu<half::f16, i32, u32>;
+    run::<B>(burn::backend::wgpu::WgpuDevice::DefaultDevice, "GPU (wgpu f16 / Metal or Vulkan)", args)
+}
+#[cfg(not(any(feature = "wgpu-f16", feature = "wgpu")))]
+fn run_gpu_f16(_: Args) -> anyhow::Result<()> {
+    anyhow::bail!("GPU f16 backend not compiled — rebuild with `--no-default-features --features wgpu-f16`")
 }
 
 fn cpu_name() -> &'static str {

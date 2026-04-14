@@ -60,9 +60,9 @@ impl<B: Backend> EncoderTransformer<B> {
         }
     }
 
-    /// token_values: [1, S, input_dim]   (zeroed channels = dropped)
-    /// tok_idx:      [S, 4]              (discrete x,y,z,tc per token)
-    /// Returns:      [1, S, output_dim]  (encoder latent)
+    /// token_values: [B, S, input_dim]   (zeroed channels = dropped)
+    /// tok_idx:      [S, 4]              (discrete x,y,z,tc per token — shared across batch)
+    /// Returns:      [B, S, output_dim]  (encoder latent)
     pub fn forward(
         &self,
         token_values: Tensor<B, 3>,

@@ -109,7 +109,7 @@ impl<B: Backend> RotaryEmbedding<B> {
 ///   x_even' =  x_even * cos - x_odd * sin
 ///   x_odd'  =  x_even * sin + x_odd * cos
 ///
-/// xq, xk : [1, S, H, D]
+/// xq, xk : [B, S, H, D]
 /// freqs   : [S, D/2, 2, 2]
 ///
 /// Returns rotated (xq', xk') with the same shape.
@@ -118,7 +118,7 @@ pub fn apply_rope<B: Backend>(
     xk: Tensor<B, 4>,
     freqs: Tensor<B, 4>,
 ) -> (Tensor<B, 4>, Tensor<B, 4>) {
-    let [_b, s, h, d] = xq.dims();
+    let [b, s, h, d] = xq.dims();
     let half = d / 2;
 
     // cos = freqs[..., 0, 0], sin = freqs[..., 1, 0]
@@ -134,31 +134,31 @@ pub fn apply_rope<B: Backend>(
         .reshape([1, s, 1, half]);
 
     (
-        rotate_half(xq, cos.clone(), sin.clone(), s, h, half),
-        rotate_half(xk, cos, sin, s, h, half),
+        rotate_half(xq, cos.clone(), sin.clone(), b, s, h, half),
+        rotate_half(xk, cos, sin, b, s, h, half),
     )
 }
 
-/// Apply rotation to a single [1, S, H, D] tensor.
+/// Apply rotation to a single [B, S, H, D] tensor.
 fn rotate_half<B: Backend>(
-    x:    Tensor<B, 4>,  // [1, S, H, D]
-    cos:  Tensor<B, 4>,  // [1, S, 1, D/2]
+    x:    Tensor<B, 4>,  // [B, S, H, D]
+    cos:  Tensor<B, 4>,  // [1, S, 1, D/2]  (broadcasts over B and H)
     sin:  Tensor<B, 4>,  // [1, S, 1, D/2]
+    b:    usize,
     s:    usize,
     h:    usize,
     half: usize,
 ) -> Tensor<B, 4> {
-    // Reshape to [1, S, H, D/2, 2] then split even/odd
-    let pairs = x.reshape([1, s, h, half, 2]);
-    let even = pairs.clone().narrow(4, 0, 1).reshape([1, s, h, half]);
-    let odd  = pairs.narrow(4, 1, 1).reshape([1, s, h, half]);
+    // Reshape to [B, S, H, D/2, 2] then split even/odd
+    let pairs = x.reshape([b, s, h, half, 2]);
+    let even = pairs.clone().narrow(4, 0, 1).reshape([b, s, h, half]);
+    let odd  = pairs.narrow(4, 1, 1).reshape([b, s, h, half]);
 
     let out_even = even.clone() * cos.clone() - odd.clone() * sin.clone();
     let out_odd  = even * sin + odd * cos;
 
-    // Interleave: stack [1,S,H,half] × 2 along new dim 4
-    //   → [1, S, H, half, 2] → reshape → [1, S, H, D]
-    // Tensor::stack::<5> takes 4-D inputs and produces 5-D output.
+    // Interleave: stack [B,S,H,half] × 2 along new dim 4
+    //   → [B, S, H, half, 2] → reshape → [B, S, H, D]
     Tensor::stack::<5>(vec![out_even, out_odd], 4)
-        .reshape([1, s, h, half * 2])
+        .reshape([b, s, h, half * 2])
 }

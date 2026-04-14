@@ -1,6 +1,6 @@
 [package]
 name = "zuna-rs"
-version = "0.0.4"
+version = "0.1.0"
 edition = "2021"
 description = "ZUNA EEG Foundation Model — inference in Rust with Burn ML"
 keywords      = ["exg", "foundational", "BCI", "GPU", "CPU"]
@@ -57,6 +57,10 @@ path = "examples/channel_bench.rs"
 # Benchmark 26 channel-padding configurations and produce UMAP figures.
 # cargo run --example channel_bench --release
 
+[[example]]
+name = "parallel_bench"
+path = "examples/parallel_bench.rs"
+
 [[bin]]
 name = "download_weights"
 path = "src/bin/download_weights.rs"
@@ -66,12 +70,17 @@ required-features = ["hf-download"]
 default = ["ndarray"]
 # CPU backend — Rayon multi-threading + SIMD enabled by default
 ndarray         = ["dep:burn-ndarray", "burn/ndarray"]
-# macOS: swap matmul impl to Apple Accelerate (multi-threaded, free, very fast on Apple Silicon)
+# macOS: swap matmul impl to Apple Accelerate (multi-threaded, very fast on Apple Silicon)
+# Recommended: cargo build --release --features blas-accelerate
 blas-accelerate = ["burn-ndarray?/blas-accelerate"]
 # Linux: use system OpenBLAS (apk add openblas-dev)
 openblas-system = ["burn-ndarray?/blas-openblas-system"]
 # GPU backend — wgpu on Metal (macOS) or Vulkan (Linux with GPU)
 wgpu            = ["burn/wgpu"]
+# GPU backend with f16 (half-precision) — 2× less memory, faster on supported GPUs.
+# Requires Metal (macOS) or Vulkan (Linux).  Not compatible with ndarray (CPU).
+# Usage: cargo build --release --no-default-features --features wgpu-f16
+wgpu-f16        = ["burn/wgpu"]
 # HuggingFace Hub downloader — requires TLS; disable on musl/Alpine (no static openssl)
 hf-download     = ["dep:hf-hub"]
 
@@ -93,6 +102,10 @@ safetensors = "0.7"
 # bf16 byte conversion for weight loading.
 half = { version = "2", features = ["bytemuck"] }
 
+
+# Thread-pool configuration (Rayon is already pulled in by burn-ndarray; this
+# direct dep lets us call rayon::ThreadPoolBuilder to set the thread count).
+rayon = "1"
 
 # CLI argument parsing.
 clap = { version = "4", features = ["derive", "env"] }
@@ -120,6 +133,7 @@ plotters = { version = "0.3", default-features = false, features = [
 opt-level = 3
 lto = "thin"
 codegen-units = 1   # single codegen unit for better inter-proc optimisation
+strip = true        # strip debug symbols — smaller binary
 
 # ── Patch cubek-matmul to add graceful fallback on Apple Silicon ──────────────
 # The published 0.1.1 panics when the SimpleCyclicCmma tile (40 KB shared mem)

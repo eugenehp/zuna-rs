@@ -41,7 +41,7 @@ use zuna_rs::{EpochEmbedding, EncodingResult, ZunaEncoder};
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, ValueEnum)]
-enum Device { Cpu, Gpu }
+enum Device { Cpu, Gpu, GpuF16 }
 
 #[derive(Parser, Debug)]
 #[command(name = "embedding_api", about = "ZUNA EEG — minimal embedding API example")]
@@ -69,6 +69,10 @@ struct Args {
     /// Output safetensors file for the embeddings produced by path A.
     #[arg(long, default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/data/api_embeddings.safetensors"))]
     output: PathBuf,
+
+    /// Number of CPU threads for NdArray backend (0 or omit = all cores).
+    #[arg(long, env = "RAYON_NUM_THREADS")]
+    threads: Option<usize>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,9 +81,11 @@ struct Args {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+    let _n = zuna_rs::init_threads(args.threads);
     match args.device {
-        Device::Cpu => run_cpu(args),
-        Device::Gpu => run_gpu(args),
+        Device::Cpu    => run_cpu(args),
+        Device::Gpu    => run_gpu(args),
+        Device::GpuF16 => run_gpu_f16(args),
     }
 }
 
@@ -93,14 +99,24 @@ fn run_cpu(_: Args) -> anyhow::Result<()> {
     anyhow::bail!("CPU backend not compiled — rebuild with `--features ndarray`")
 }
 
-#[cfg(feature = "wgpu")]
+#[cfg(any(feature = "wgpu", feature = "wgpu-f16"))]
 fn run_gpu(args: Args) -> anyhow::Result<()> {
     use burn::backend::{wgpu::WgpuDevice, Wgpu};
     run::<Wgpu>(WgpuDevice::DefaultDevice, args)
 }
-#[cfg(not(feature = "wgpu"))]
+#[cfg(not(any(feature = "wgpu", feature = "wgpu-f16")))]
 fn run_gpu(_: Args) -> anyhow::Result<()> {
     anyhow::bail!("GPU backend not compiled — rebuild with `--no-default-features --features wgpu`")
+}
+
+#[cfg(any(feature = "wgpu-f16", feature = "wgpu"))]
+fn run_gpu_f16(args: Args) -> anyhow::Result<()> {
+    type B = burn::backend::wgpu::Wgpu<half::f16, i32, u32>;
+    run::<B>(burn::backend::wgpu::WgpuDevice::DefaultDevice, args)
+}
+#[cfg(not(any(feature = "wgpu-f16", feature = "wgpu")))]
+fn run_gpu_f16(_: Args) -> anyhow::Result<()> {
+    anyhow::bail!("GPU f16 backend not compiled — rebuild with `--no-default-features --features wgpu-f16`")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -37,9 +37,9 @@ impl<B: Backend> Attention<B> {
         }
     }
 
-    /// x:       [1, S, dim]
-    /// freqs_4d: [S, head_dim/2, 2, 2]
-    /// Returns: [1, S, dim]
+    /// x:       [B, S, dim]
+    /// freqs_4d: [S, head_dim/2, 2, 2]  (broadcasts over B)
+    /// Returns: [B, S, dim]
     pub fn forward(
         &self,
         x: Tensor<B, 3>,

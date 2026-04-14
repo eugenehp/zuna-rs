@@ -236,7 +236,7 @@ impl<B: Backend> ZunaDecoder<B> {
         let shape         = recon.dims().to_vec();
         let reconstructed = recon
             .into_data()
-            .to_vec::<f32>()
+            .convert::<f32>().to_vec::<f32>()
             .map_err(|e| anyhow::anyhow!("recon→vec: {e:?}"))?;
         let chan_pos = ep.chan_pos.clone();
 

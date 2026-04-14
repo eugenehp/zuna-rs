@@ -69,10 +69,19 @@ cargo run --example embed --release
 # Verbose step-by-step with timing
 cargo run --example infer --release -- --verbose
 
-# Custom FIF, GPU (rebuild required)
+# GPU f32 (Metal / Vulkan)
 cargo run --example embed --release \
     --no-default-features --features wgpu -- \
     --device gpu --fif my.fif
+
+# GPU f16 — half-precision, fastest (~1.5× faster than f32 GPU)
+# NOTE: f16 has reduced precision (10-bit mantissa vs 23-bit for f32).
+# Embeddings are approximately N(0,1) and well within f16 range, but
+# downstream tasks sensitive to fine numerical differences should
+# validate against f32 outputs first.
+cargo run --example embed --release \
+    --no-default-features --features wgpu-f16 -- \
+    --device gpu-f16 --fif my.fif
 
 # Run benchmark: build, time, compare Python NumPy vs Rust, generate charts
 sh zuna-rs/benchmark.sh
@@ -113,7 +122,7 @@ cargo run --example embed --release -- --hf-cache /mnt/models/.cache
 cargo run --example infer --release -- [OPTIONS]
 
 Options:
-  --device cpu|gpu        Compute backend (default: cpu)
+  --device cpu|gpu|gpu-f16  Compute backend (default: cpu)
   --repo <id>             HuggingFace model repo (default: Zyphra/ZUNA)
   --weights <path>        Explicit safetensors weights (skip HF)
   --config  <path>        Explicit config.json (must pair with --weights)
@@ -123,6 +132,7 @@ Options:
   --steps   <n>           Diffusion steps (default: 50)
   --cfg     <f>           Classifier-free guidance (default: 1.0)
   --data-norm <f>         Normalisation divisor (default: 10.0)
+  --threads <n>           CPU threads (default: all cores)
   --verbose / -v          Step-by-step timing + electrode table
   --no-charts             Skip PNG chart generation
 ```
@@ -637,23 +647,60 @@ reconstructed_2          1.000000   8.3×10⁻⁶   6.2×10⁻⁵
 ## Build options
 
 ```sh
-# CPU (default) — NdArray + Rayon
+# CPU (default) — NdArray + Rayon + SIMD
 cargo build --release
 
-# CPU + Apple Accelerate (macOS — recommended)
+# CPU + Apple Accelerate BLAS (macOS — recommended, ~2.3× faster)
 cargo build --release --features blas-accelerate
 
 # CPU + system OpenBLAS (Linux — skip on Alpine/musl)
 cargo build --release --features openblas-system
 
-# GPU via wgpu — Metal (macOS) or Vulkan (Linux)
+# GPU via wgpu f32 — Metal (macOS) or Vulkan (Linux)
 cargo build --release --no-default-features --features wgpu
+
+# GPU via wgpu f16 — half-precision, ~1.5× faster than f32 on Metal
+cargo build --release --no-default-features --features wgpu-f16
 
 # Examples
 cargo build --examples --release
 
 # Tests (must be serial — model weights = 1.7 GB)
 cargo test --release -- --test-threads=1
+```
+
+### Configuring threads
+
+All binaries and examples accept `--threads N` to control the Rayon thread
+pool size (defaults to all logical CPUs).  Alternatively, set the
+`RAYON_NUM_THREADS` environment variable.  For Apple Accelerate, BLAS thread
+count is controlled independently via `VECLIB_MAXIMUM_THREADS`.
+
+```sh
+# Use 4 threads
+cargo run --example embed --release --features blas-accelerate -- --threads 4
+```
+
+### Encoder performance (3 epochs, 12 channels)
+
+| Backend | Encode | Per epoch | vs default |
+|---|---|---|---|
+| NdArray + Rayon (default) | 5,917 ms | ~1,972 ms | 1.0× |
+| NdArray + Accelerate | 3,334 ms | ~1,111 ms | **1.8×** |
+| wgpu Metal f32 | 1,835 ms | ~612 ms | **3.2×** |
+| wgpu Metal f16 | 1,258 ms | ~419 ms | **4.7×** ¹ |
+
+¹ f16 trades precision for speed: 10-bit vs 23-bit mantissa. Validate f16
+outputs against f32 before using in precision-sensitive pipelines.
+
+### Multi-file parallel encoding
+
+For bulk workloads (thousands of FIF files), use `encode_fif_parallel` to
+overlap FIF I/O and preprocessing across files:
+
+```rust,ignore
+let paths: Vec<PathBuf> = glob("data/*.fif")?.collect();
+let results = enc.encode_fif_parallel(&paths, 10.0)?;
 ```
 
 ---
@@ -714,7 +761,7 @@ run.sh                     One-command full inference quickstart
 | **Per-epoch inference** | Eliminates document-masking; seqlen ≤ 480 fits in full attention |
 | **exg crate** | Native FIF + full MNE-compatible pipeline — no Python at runtime |
 | **safetensors I/O** | No PyTorch pickle; output readable without torch |
-| **NdArray default, wgpu optional** | Works on Alpine musl / any CPU |
+| **NdArray default, wgpu/wgpu-f16 optional** | Works on Alpine musl / any CPU; f16 GPU for max throughput |
 | **Manual weight loading** | Full key-mapping visibility |
 | **Python fallback download** | `hf-hub` needs TLS (unavailable on Alpine); `python3 huggingface_hub` always works |
 | **`hf-download` feature-gated** | TLS needs system OpenSSL (unavailable on Alpine musl) |
