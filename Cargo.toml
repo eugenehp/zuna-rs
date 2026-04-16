@@ -1,6 +1,6 @@
 [package]
 name = "zuna-rs"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "ZUNA EEG Foundation Model — inference in Rust with Burn ML"
 keywords      = ["exg", "foundational", "BCI", "GPU", "CPU"]
@@ -91,7 +91,7 @@ burn-ndarray = { version = "0.20.1", default-features = false, features = ["std"
 
 # EEG preprocessing (FIF reader + full pipeline in pure Rust).
 # exg = { git = "https://github.com/eugenehp/exg", tag = "0.0.1", version = "0.0.1"}
-exg = "0.0.3"
+exg = { version = "0.0.3", default-features = false }
 
 # ndarray — used to pass Array2<f32> between exg and Burn tensors.
 ndarray = "0.17"
