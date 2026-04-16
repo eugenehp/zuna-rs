@@ -1,6 +1,6 @@
 [package]
 name = "zuna-rs"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "ZUNA EEG Foundation Model — inference in Rust with Burn ML"
 keywords      = ["exg", "foundational", "BCI", "GPU", "CPU"]

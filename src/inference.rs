@@ -353,15 +353,15 @@ impl<B: Backend> ZunaInference<B> {
             batch.encoder_input, batch.tok_idx, &self.rope,
         );
         let [_, s, output_dim] = enc_out.dims();
-        let embeddings = enc_out.squeeze::<2>().into_data()
-            .convert::<f32>().to_vec::<f32>().map_err(|e| anyhow::anyhow!("embedding→vec: {e:?}"))?;
+        let embeddings = tensor_data_to_f32(enc_out.squeeze::<2>().into_data())
+            .map_err(|e| anyhow::anyhow!("embedding→vec: {e}"))?;
         let tok_idx_data = tok_idx_saved.into_data();
         let tok_idx: Vec<i64> = tok_idx_data.to_vec::<i64>()
             .or_else(|_| tok_idx_data.to_vec::<i32>()
                 .map(|v| v.into_iter().map(|x| x as i64).collect()))
             .map_err(|e| anyhow::anyhow!("tok_idx→vec: {e:?}"))?;
-        let chan_pos = chan_pos_saved.into_data()
-            .convert::<f32>().to_vec::<f32>().map_err(|e| anyhow::anyhow!("chan_pos→vec: {e:?}"))?;
+        let chan_pos = tensor_data_to_f32(chan_pos_saved.into_data())
+            .map_err(|e| anyhow::anyhow!("chan_pos→vec: {e}"))?;
         Ok(EpochEmbedding { embeddings, shape: vec![s, output_dim], tok_idx, chan_pos, n_channels, tc })
     }
 
@@ -382,20 +382,48 @@ impl<B: Backend> ZunaInference<B> {
             let [_, s, od] = enc.dims();
             let (n_channels, tc, ref tok_idx_saved, ref chan_pos_saved) = metadata[i];
 
-            let embeddings = enc.squeeze::<2>().into_data()
-                .to_vec::<f32>().map_err(|e| anyhow::anyhow!("embedding→vec: {e:?}"))?;
+            let embeddings = tensor_data_to_f32(enc.squeeze::<2>().into_data())
+                .map_err(|e| anyhow::anyhow!("embedding→vec: {e}"))?;
             let tok_idx_data = tok_idx_saved.clone().into_data();
             let tok_idx: Vec<i64> = tok_idx_data.to_vec::<i64>()
                 .or_else(|_| tok_idx_data.to_vec::<i32>()
                     .map(|v| v.into_iter().map(|x| x as i64).collect()))
                 .map_err(|e| anyhow::anyhow!("tok_idx→vec: {e:?}"))?;
-            let chan_pos = chan_pos_saved.clone().into_data()
-                .to_vec::<f32>().map_err(|e| anyhow::anyhow!("chan_pos→vec: {e:?}"))?;
+            let chan_pos = tensor_data_to_f32(chan_pos_saved.clone().into_data())
+                .map_err(|e| anyhow::anyhow!("chan_pos→vec: {e}"))?;
 
             Ok(EpochEmbedding { embeddings, shape: vec![s, od], tok_idx, chan_pos, n_channels, tc })
         }).collect()
     }
 
+}
+
+/// Convert TensorData bytes to Vec<f32>, handling both f32 and f16 element types.
+/// Works around burn's `.convert::<f32>().to_vec::<f32>()` failing with
+/// TypeMismatch on some wgpu backends (e.g. Wgpu<half::f16, ..>).
+fn tensor_data_to_f32(data: burn::tensor::TensorData) -> Result<Vec<f32>, String> {
+    // Try direct f32 extraction first (works when backend uses f32).
+    if let Ok(v) = data.to_vec::<f32>() {
+        return Ok(v);
+    }
+    // Try burn's convert path.
+    let converted = data.clone().convert::<f32>();
+    if let Ok(v) = converted.to_vec::<f32>() {
+        return Ok(v);
+    }
+    // Manual f16→f32 conversion from raw bytes.
+    let bytes = &data.bytes;
+    if bytes.len() % 2 == 0 {
+        let values: Vec<f32> = bytes
+            .chunks_exact(2)
+            .map(|c| half::f16::from_le_bytes([c[0], c[1]]).to_f32())
+            .collect();
+        return Ok(values);
+    }
+    Err(format!("cannot convert tensor data ({} bytes) to f32", bytes.len()))
+}
+
+impl<B: Backend> ZunaInference<B> {
     // ── Decode from pre-computed embeddings ──────────────────────────────────
 
     /// Decode [`EncodingResult`] through the decoder diffusion loop.
