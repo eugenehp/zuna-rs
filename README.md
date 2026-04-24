@@ -18,7 +18,7 @@ preprocessing, and model inference — run without Python or PyTorch.
    │  global z-score → ÷ data_norm
    │  epoch (5 s @ 256 Hz)
    │
-   ▼  ZUNA model (Burn / NdArray or wgpu)
+   ▼  ZUNA model (Burn / NdArray, wgpu, or MLX)
    │  EncoderTransformer  (16 × TransformerBlock, 4-D RoPE, SwiGLU)
    │  Passthrough MMD bottleneck
    │  DecoderTransformer  (16 × DecoderBlock, AdaRMSNorm, CrossAttention)
@@ -74,14 +74,20 @@ cargo run --example embed --release \
     --no-default-features --features wgpu -- \
     --device gpu --fif my.fif
 
-# GPU f16 — half-precision, fastest (~1.5× faster than f32 GPU)
-# NOTE: f16 has reduced precision (10-bit mantissa vs 23-bit for f32).
-# Embeddings are approximately N(0,1) and well within f16 range, but
-# downstream tasks sensitive to fine numerical differences should
-# validate against f32 outputs first.
+# GPU f16 — half-precision (~1.5× faster than f32 GPU)
 cargo run --example embed --release \
     --no-default-features --features wgpu-f16 -- \
     --device gpu-f16 --fif my.fif
+
+# MLX f32 — Apple Silicon native GPU (fastest, ~20× faster than CPU)
+cargo run --example embed --release \
+    --no-default-features --features mlx -- \
+    --device mlx --fif my.fif
+
+# MLX f16 — Apple Silicon native GPU, half-precision (~28× faster than CPU)
+cargo run --example embed --release \
+    --no-default-features --features mlx-f16 -- \
+    --device mlx-f16 --fif my.fif
 
 # Run benchmark: build, time, compare Python NumPy vs Rust, generate charts
 sh zuna-rs/benchmark.sh
@@ -662,11 +668,38 @@ cargo build --release --no-default-features --features wgpu
 # GPU via wgpu f16 — half-precision, ~1.5× faster than f32 on Metal
 cargo build --release --no-default-features --features wgpu-f16
 
+# MLX f32 — Apple Silicon native GPU (macOS only, fastest)
+cargo build --release --no-default-features --features mlx
+
+# MLX f16 — Apple Silicon native GPU, half-precision
+cargo build --release --no-default-features --features mlx-f16
+
+# Multiple backends for runtime selection via --device flag
+cargo build --release --features ndarray,mlx
+
 # Examples
 cargo build --examples --release
 
 # Tests (must be serial — model weights = 1.7 GB)
 cargo test --release -- --test-threads=1
+```
+
+### Runtime backend selection
+
+Compile with multiple feature flags to enable runtime switching via `--device`:
+
+```sh
+# Build with CPU + MLX backends
+cargo build --release --features ndarray,mlx --example embed
+
+# Then select at runtime:
+cargo run --example embed --release --features ndarray,mlx -- --device cpu    # NdArray
+cargo run --example embed --release --features ndarray,mlx -- --device mlx    # MLX f32
+cargo run --example embed --release --features ndarray,mlx -- --device mlx-f16 # MLX f16
+
+# All backends in one binary:
+cargo build --release --features ndarray,mlx,wgpu --example embed
+# --device cpu | gpu | gpu-f16 | mlx | mlx-f16
 ```
 
 ### Configuring threads
@@ -683,15 +716,51 @@ cargo run --example embed --release --features blas-accelerate -- --threads 4
 
 ### Encoder performance (3 epochs, 12 channels)
 
-| Backend | Encode | Per epoch | vs default |
-|---|---|---|---|
-| NdArray + Rayon (default) | 5,917 ms | ~1,972 ms | 1.0× |
-| NdArray + Accelerate | 3,334 ms | ~1,111 ms | **1.8×** |
-| wgpu Metal f32 | 1,835 ms | ~612 ms | **3.2×** |
-| wgpu Metal f16 | 1,258 ms | ~419 ms | **4.7×** ¹ |
+![Backend comparison](./figures/backend_comparison.png)
+
+| Backend | Encode | Per epoch | vs default | Precision (vs CPU) |
+|---|---|---|---|---|
+| NdArray + Rayon (default) | 5,916 ms | ~1,972 ms | 1.0× | baseline |
+| NdArray + Accelerate | 3,403 ms | ~1,134 ms | **1.7×** | identical |
+| wgpu Metal f32 | 1,811 ms | ~604 ms | **3.3×** | r=1.000000 |
+| wgpu Metal f16 | 1,194 ms | ~398 ms | **5.0×** ¹ | r=0.999999 |
+| **MLX f32** | **285 ms** | **~95 ms** | **20.8×** | r=1.000000, MAE=8.3e-7 |
+| **MLX f16** | **213 ms** | **~71 ms** | **27.8×** ¹ | r=1.000000 |
+
+MLX uses Apple's Metal Performance Shaders with unified memory (zero-copy
+CPU/GPU), lazy evaluation with automatic operation fusion, and native Apple
+Silicon Neural Engine support — achieving **6.4× faster** than wgpu Metal f32
+and **5.6× faster** than wgpu Metal f16 on the same hardware.
 
 ¹ f16 trades precision for speed: 10-bit vs 23-bit mantissa. Validate f16
 outputs against f32 before using in precision-sensitive pipelines.
+
+### Backend × channel-count benchmark
+
+Encoder forward pass (1 epoch, best of 3 runs) across backends and channel
+counts.  Run with `cargo run --example backend_bench --release --features ndarray,mlx,wgpu`.
+
+![Backend × Channel benchmark](./figures/backend_channel_bench.png)
+
+| Backend | 4 ch | 8 ch | 12 ch | 19 ch | 32 ch | 64 ch |
+|---|---|---|---|---|---|---|
+| NdArray + Accelerate | 397 ms | 731 ms | 1,205 ms | 2,429 ms | 5,873 ms | 21,347 ms |
+| wgpu Metal f32 | 167 ms | 336 ms | 523 ms | 887 ms | 1,697 ms | 4,488 ms |
+| wgpu Metal f16 | 62 ms | 235 ms | 290 ms | 499 ms | 857 ms | 2,205 ms |
+| **MLX f32** | **27 ms** | **54 ms** | **90 ms** | **169 ms** | **353 ms** | **1,096 ms** |
+| **MLX f16** | **24 ms** | **45 ms** | **69 ms** | **126 ms** | **249 ms** | **703 ms** |
+
+**Speedup vs NdArray + Accelerate:**
+
+| Backend | 4 ch | 8 ch | 12 ch | 19 ch | 32 ch | 64 ch |
+|---|---|---|---|---|---|---|
+| wgpu f32 | 2.4× | 2.2× | 2.3× | 2.7× | 3.5× | 4.8× |
+| wgpu f16 | 6.4× | 3.1× | 4.1× | 4.9× | 6.9× | 9.7× |
+| **MLX f32** | **14.8×** | **13.5×** | **13.3×** | **14.4×** | **16.6×** | **19.5×** |
+| **MLX f16** | **16.8×** | **16.4×** | **17.6×** | **19.2×** | **23.6×** | **30.4×** |
+
+MLX f16 speedup increases with channel count (16.8× at 4 ch → 30.4× at 64 ch),
+showing that MLX scales more efficiently with larger sequence lengths.
 
 ### Multi-file parallel encoding
 
@@ -761,7 +830,7 @@ run.sh                     One-command full inference quickstart
 | **Per-epoch inference** | Eliminates document-masking; seqlen ≤ 480 fits in full attention |
 | **exg crate** | Native FIF + full MNE-compatible pipeline — no Python at runtime |
 | **safetensors I/O** | No PyTorch pickle; output readable without torch |
-| **NdArray default, wgpu/wgpu-f16 optional** | Works on Alpine musl / any CPU; f16 GPU for max throughput |
+| **NdArray default, wgpu/MLX optional** | Works on Alpine musl / any CPU; MLX for max throughput on Apple Silicon |
 | **Manual weight loading** | Full key-mapping visibility |
 | **Python fallback download** | `hf-hub` needs TLS (unavailable on Alpine); `python3 huggingface_hub` always works |
 | **`hf-download` feature-gated** | TLS needs system OpenSSL (unavailable on Alpine musl) |

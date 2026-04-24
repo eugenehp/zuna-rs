@@ -9,49 +9,34 @@
 /// Build — GPU (Metal on macOS, Vulkan on Linux):
 ///   cargo build --release --no-default-features --features wgpu
 ///
+/// Build — MLX (Apple Silicon native, macOS only):
+///   cargo build --release --no-default-features --features mlx
+///
+/// Build — multiple backends for runtime selection:
+///   cargo build --release --features ndarray,mlx
+///
 /// Usage:
 ///   infer --weights <st> --config <json> --fif <fif> --output <st>
+///         [--device cpu|gpu|gpu-f16|mlx|mlx-f16]
 ///         [--steps 50] [--cfg 1.0] [--data-norm 10.0] [--verbose]
 
 use std::{path::Path, time::Instant};
-use clap::Parser;
+use burn::prelude::Backend;
+use clap::{Parser, ValueEnum};
 use zuna_rs::ZunaInference;
 
-// ── Backend ───────────────────────────────────────────────────────────────────
-#[cfg(all(feature = "wgpu-f16", not(feature = "ndarray"), not(feature = "wgpu")))]
-mod backend {
-    pub type B = burn::backend::wgpu::Wgpu<half::f16, i32, u32>;
-    pub type Device = burn::backend::wgpu::WgpuDevice;
-    pub fn device() -> Device { Device::DefaultDevice }
-    pub const NAME: &str = "GPU (wgpu f16 / Metal or Vulkan)";
-}
-
-#[cfg(all(feature = "wgpu", not(feature = "ndarray"), not(feature = "wgpu-f16")))]
-mod backend {
-    pub use burn::backend::{Wgpu as B, wgpu::WgpuDevice as Device};
-    pub fn device() -> Device { Device::DefaultDevice }
-    pub const NAME: &str = "GPU (wgpu / Metal or Vulkan)";
-}
-
-#[cfg(feature = "ndarray")]
-mod backend {
-    pub use burn::backend::NdArray as B;
-    pub type Device = burn::backend::ndarray::NdArrayDevice;
-    pub fn device() -> Device { Device::Cpu }
-    #[cfg(feature = "blas-accelerate")]
-    pub const NAME: &str = "CPU (NdArray + Apple Accelerate)";
-    #[cfg(feature = "openblas-system")]
-    pub const NAME: &str = "CPU (NdArray + OpenBLAS)";
-    #[cfg(not(any(feature = "blas-accelerate", feature = "openblas-system")))]
-    pub const NAME: &str = "CPU (NdArray + Rayon)";
-}
-
-use backend::{B, device};
-
 // ── CLI ───────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, ValueEnum)]
+enum Device { Cpu, Gpu, GpuF16, Mlx, MlxF16 }
+
 #[derive(Parser, Debug)]
 #[command(about = "ZUNA EEG model inference (Burn 0.20.1)")]
 struct Args {
+    /// Compute device.
+    #[arg(long, default_value = "cpu")]
+    device: Device,
+
     /// Safetensors weights file (from HuggingFace Zyphra/ZUNA).
     #[arg(long)]
     weights: String,
@@ -93,20 +78,87 @@ struct Args {
     verbose: bool,
 }
 
+// ── Per-backend shims ─────────────────────────────────────────────────────────
+
+#[cfg(feature = "ndarray")]
+fn run_cpu(args: Args) -> anyhow::Result<()> {
+    use burn::backend::{ndarray::NdArrayDevice, NdArray};
+    let name = if cfg!(feature = "blas-accelerate") { "CPU (NdArray + Apple Accelerate)" }
+               else if cfg!(feature = "openblas-system") { "CPU (NdArray + OpenBLAS)" }
+               else { "CPU (NdArray + Rayon)" };
+    run::<NdArray>(NdArrayDevice::Cpu, name, args)
+}
+#[cfg(not(feature = "ndarray"))]
+fn run_cpu(_: Args) -> anyhow::Result<()> {
+    anyhow::bail!("CPU backend not compiled — rebuild with `--features ndarray`")
+}
+
+#[cfg(any(feature = "wgpu", feature = "wgpu-f16"))]
+fn run_gpu(args: Args) -> anyhow::Result<()> {
+    use burn::backend::{wgpu::WgpuDevice, Wgpu};
+    run::<Wgpu>(WgpuDevice::DefaultDevice, "GPU (wgpu f32)", args)
+}
+#[cfg(not(any(feature = "wgpu", feature = "wgpu-f16")))]
+fn run_gpu(_: Args) -> anyhow::Result<()> {
+    anyhow::bail!("GPU backend not compiled — rebuild with `--features wgpu`")
+}
+
+#[cfg(any(feature = "wgpu-f16", feature = "wgpu"))]
+fn run_gpu_f16(args: Args) -> anyhow::Result<()> {
+    type B = burn::backend::wgpu::Wgpu<half::f16, i32, u32>;
+    run::<B>(burn::backend::wgpu::WgpuDevice::DefaultDevice, "GPU (wgpu f16)", args)
+}
+#[cfg(not(any(feature = "wgpu-f16", feature = "wgpu")))]
+fn run_gpu_f16(_: Args) -> anyhow::Result<()> {
+    anyhow::bail!("GPU f16 backend not compiled — rebuild with `--features wgpu-f16`")
+}
+
+#[cfg(any(feature = "mlx", feature = "mlx-f16"))]
+fn run_mlx(args: Args) -> anyhow::Result<()> {
+    use burn_mlx::{Mlx, MlxDevice};
+    run::<Mlx>(MlxDevice::Gpu, "MLX (Apple Silicon f32)", args)
+}
+#[cfg(not(any(feature = "mlx", feature = "mlx-f16")))]
+fn run_mlx(_: Args) -> anyhow::Result<()> {
+    anyhow::bail!("MLX backend not compiled — rebuild with `--features mlx`")
+}
+
+#[cfg(any(feature = "mlx-f16", feature = "mlx"))]
+fn run_mlx_f16(args: Args) -> anyhow::Result<()> {
+    use burn_mlx::{MlxHalf, MlxDevice};
+    run::<MlxHalf>(MlxDevice::Gpu, "MLX (Apple Silicon f16)", args)
+}
+#[cfg(not(any(feature = "mlx-f16", feature = "mlx")))]
+fn run_mlx_f16(_: Args) -> anyhow::Result<()> {
+    anyhow::bail!("MLX f16 backend not compiled — rebuild with `--features mlx-f16`")
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 fn main() -> anyhow::Result<()> {
     let args  = Args::parse();
-    let n_threads = zuna_rs::init_threads(args.threads);
-    let t0    = Instant::now();
-    let dev   = device();
+    let _n_threads = zuna_rs::init_threads(args.threads);
+    match args.device {
+        Device::Cpu    => run_cpu(args),
+        Device::Gpu    => run_gpu(args),
+        Device::GpuF16 => run_gpu_f16(args),
+        Device::Mlx    => run_mlx(args),
+        Device::MlxF16 => run_mlx_f16(args),
+    }
+}
 
-    println!("Backend : {}  ({n_threads} threads)", backend::NAME);
+// ── Generic inference (backend-agnostic) ─────────────────────────────────────
+
+fn run<B: Backend>(dev: B::Device, backend_name: &str, args: Args) -> anyhow::Result<()> {
+    let n_threads = rayon::current_num_threads();
+    let t0 = Instant::now();
+
+    println!("Backend : {backend_name}  ({n_threads} threads)");
 
     // ── Load model ────────────────────────────────────────────────────────────
     let (zuna, ms_weights) = ZunaInference::<B>::load(
         Path::new(&args.config),
         Path::new(&args.weights),
-        dev,
+        dev.clone(),
     )?;
 
     if args.verbose {
@@ -206,3 +258,5 @@ fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+// Unused `device()` helper removed — device is now constructed per-backend in run_* shims.

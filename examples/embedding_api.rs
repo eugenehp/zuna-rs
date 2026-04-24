@@ -41,7 +41,7 @@ use zuna_rs::{EpochEmbedding, EncodingResult, ZunaEncoder};
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, ValueEnum)]
-enum Device { Cpu, Gpu, GpuF16 }
+enum Device { Cpu, Gpu, GpuF16, Mlx, MlxF16 }
 
 #[derive(Parser, Debug)]
 #[command(name = "embedding_api", about = "ZUNA EEG — minimal embedding API example")]
@@ -86,6 +86,8 @@ fn main() -> anyhow::Result<()> {
         Device::Cpu    => run_cpu(args),
         Device::Gpu    => run_gpu(args),
         Device::GpuF16 => run_gpu_f16(args),
+        Device::Mlx    => run_mlx(args),
+        Device::MlxF16 => run_mlx_f16(args),
     }
 }
 
@@ -117,6 +119,26 @@ fn run_gpu_f16(args: Args) -> anyhow::Result<()> {
 #[cfg(not(any(feature = "wgpu-f16", feature = "wgpu")))]
 fn run_gpu_f16(_: Args) -> anyhow::Result<()> {
     anyhow::bail!("GPU f16 backend not compiled — rebuild with `--no-default-features --features wgpu-f16`")
+}
+
+#[cfg(any(feature = "mlx", feature = "mlx-f16"))]
+fn run_mlx(args: Args) -> anyhow::Result<()> {
+    use burn_mlx::{Mlx, MlxDevice};
+    run::<Mlx>(MlxDevice::Gpu, args)
+}
+#[cfg(not(any(feature = "mlx", feature = "mlx-f16")))]
+fn run_mlx(_: Args) -> anyhow::Result<()> {
+    anyhow::bail!("MLX backend not compiled — rebuild with `--no-default-features --features mlx`")
+}
+
+#[cfg(any(feature = "mlx-f16", feature = "mlx"))]
+fn run_mlx_f16(args: Args) -> anyhow::Result<()> {
+    use burn_mlx::{MlxHalf, MlxDevice};
+    run::<MlxHalf>(MlxDevice::Gpu, args)
+}
+#[cfg(not(any(feature = "mlx-f16", feature = "mlx")))]
+fn run_mlx_f16(_: Args) -> anyhow::Result<()> {
+    anyhow::bail!("MLX f16 backend not compiled — rebuild with `--no-default-features --features mlx-f16`")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

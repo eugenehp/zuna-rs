@@ -1,6 +1,6 @@
 [package]
 name = "zuna-rs"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "ZUNA EEG Foundation Model — inference in Rust with Burn ML"
 keywords      = ["exg", "foundational", "BCI", "GPU", "CPU"]
@@ -58,6 +58,12 @@ path = "examples/channel_bench.rs"
 # cargo run --example channel_bench --release
 
 [[example]]
+name = "backend_bench"
+path = "examples/backend_bench.rs"
+# Backend × channel-count sweep benchmark.
+# cargo run --example backend_bench --release --features ndarray,mlx
+
+[[example]]
 name = "parallel_bench"
 path = "examples/parallel_bench.rs"
 
@@ -81,6 +87,11 @@ wgpu            = ["burn/wgpu"]
 # Requires Metal (macOS) or Vulkan (Linux).  Not compatible with ndarray (CPU).
 # Usage: cargo build --release --no-default-features --features wgpu-f16
 wgpu-f16        = ["burn/wgpu"]
+# MLX backend — Apple Silicon GPU via Apple's MLX framework (macOS only).
+# Usage: cargo build --release --no-default-features --features mlx
+mlx             = ["dep:burn-mlx"]
+# MLX backend with f16 (half-precision) — faster on Apple Silicon.
+mlx-f16         = ["dep:burn-mlx"]
 # HuggingFace Hub downloader — requires TLS; disable on musl/Alpine (no static openssl)
 hf-download     = ["dep:hf-hub"]
 
@@ -88,6 +99,8 @@ hf-download     = ["dep:hf-hub"]
 burn = { version = "0.20.1", default-features = false, features = ["std", "simd"] }
 # Direct dep so we can opt-in to multi-threads + simd that burn strips via default-features=false
 burn-ndarray = { version = "0.20.1", default-features = false, features = ["std", "simd", "multi-threads"], optional = true }
+# MLX backend — Apple Silicon GPU via Apple's MLX framework
+burn-mlx = { version = "0.1", git = "https://github.com/eidola-ai/burn-mlx", optional = true }
 
 # EEG preprocessing (FIF reader + full pipeline in pure Rust).
 # exg = { git = "https://github.com/eugenehp/exg", tag = "0.0.1", version = "0.0.1"}
