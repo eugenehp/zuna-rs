@@ -1,2 +1,7 @@
 .DS_Store
 target
+
+# Local-only artefacts produced by examples / tests / parity dumps.
+data/encoder_inputs.safetensors
+data/python_reference.safetensors
+scripts/__pycache__/

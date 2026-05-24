@@ -103,6 +103,23 @@ pub mod inference;
 pub mod model;
 pub mod weights;
 
+/// Alternate inference implementation built on the [RLX] compiler/runtime.
+///
+/// Surfaces the same `ZunaInference` / `ZunaEncoder` / `ZunaDecoder`
+/// shape as the Burn-backed types at the crate root, but lives under
+/// `zuna_rs::rlx::*`. Both implementations agree to within FP32 ULP
+/// on every supported backend (CPU, Apple Metal, Apple MLX); the
+/// regression coverage is `tests/parity_rlx_vs_burn.rs` and
+/// `tests/parity_rlx_vs_python.rs`.
+///
+/// Enable with `--features rlx-backend` (default-on). To target a
+/// specific RLX backend, pair with one of `rlx-cpu` / `rlx-metal` /
+/// `rlx-mlx`.
+///
+/// [RLX]: https://github.com/MIT-RLX/rlx
+#[cfg(feature = "rlx-backend")]
+pub mod rlx;
+
 // ── Flat re-exports ───────────────────────────────────────────────────────────
 //
 // Everything a downstream user needs is available as `zuna_rs::Foo` without

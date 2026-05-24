@@ -73,7 +73,8 @@ path = "src/bin/download_weights.rs"
 required-features = ["hf-download"]
 
 [features]
-default = ["ndarray"]
+default = ["ndarray", "rlx-backend"]
+# ── Burn backends (legacy reference implementation) ─────────────────────────
 # CPU backend — Rayon multi-threading + SIMD enabled by default
 ndarray         = ["dep:burn-ndarray", "burn/ndarray"]
 # macOS: swap matmul impl to Apple Accelerate (multi-threaded, very fast on Apple Silicon)
@@ -92,6 +93,20 @@ wgpu-f16        = ["burn/wgpu"]
 mlx             = ["dep:burn-mlx"]
 # MLX backend with f16 (half-precision) — faster on Apple Silicon.
 mlx-f16         = ["dep:burn-mlx"]
+
+# ── RLX backend (new implementation; coexists with Burn for parity) ─────────
+# Enables the `zuna_rs::rlx` module — the in-progress RLX migration of the
+# encoder, decoder, and inference pipeline. Required for the parity test.
+rlx-backend     = ["dep:rlx"]
+# RLX CPU backend (default for parity testing).
+rlx-cpu         = ["rlx?/cpu"]
+# RLX Apple Metal backend (Apple Silicon native).
+rlx-metal       = ["rlx?/metal"]
+# RLX Apple MLX backend (vendored, git source only).
+rlx-mlx         = ["rlx?/mlx"]
+# RLX Accelerate (macOS).
+rlx-accelerate  = ["rlx?/blas-accelerate"]
+
 # HuggingFace Hub downloader — requires TLS; disable on musl/Alpine (no static openssl)
 hf-download     = ["dep:hf-hub"]
 
@@ -101,6 +116,11 @@ burn = { version = "0.20.1", default-features = false, features = ["std", "simd"
 burn-ndarray = { version = "0.20.1", default-features = false, features = ["std", "simd", "multi-threads"], optional = true }
 # MLX backend — Apple Silicon GPU via Apple's MLX framework
 burn-mlx = { version = "0.1", git = "https://github.com/eidola-ai/burn-mlx", optional = true }
+
+# RLX compiler/runtime — alternate inference backend (in-progress migration).
+# Optional so the legacy Burn build keeps working unchanged; enable with
+# --features rlx-backend (on by default in the workspace default set).
+rlx = { path = "../rlx/rlx", default-features = false, features = ["cpu"], optional = true }
 
 # EEG preprocessing (FIF reader + full pipeline in pure Rust).
 # exg = { git = "https://github.com/eugenehp/exg", tag = "0.0.1", version = "0.0.1"}

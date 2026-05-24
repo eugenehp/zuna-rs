@@ -3040,6 +3040,21 @@ dependencies = [
 
 [[package]]
 name = "metal"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c3572083504c43e14aec05447f8a3d57cce0f66d7a3c1b9058572eca4d70ab9"
+dependencies = [
+ "bitflags 2.11.0",
+ "block",
+ "core-graphics-types 0.1.3",
+ "foreign-types 0.5.0",
+ "log",
+ "objc",
+ "paste",
+]
+
+[[package]]
+name = "metal"
 version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00c15a6f673ff72ddcc22394663290f870fb224c1bfce55734a75c414150e605"
@@ -4042,6 +4057,157 @@ dependencies = [
 ]
 
 [[package]]
+name = "rlx"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "rlx-driver",
+ "rlx-ir",
+ "rlx-macros",
+ "rlx-opt",
+ "rlx-runtime",
+]
+
+[[package]]
+name = "rlx-autodiff"
+version = "0.2.0"
+dependencies = [
+ "rlx-fusion",
+ "rlx-ir",
+]
+
+[[package]]
+name = "rlx-compile"
+version = "0.2.0"
+dependencies = [
+ "rlx-autodiff",
+ "rlx-fusion",
+ "rlx-ir",
+]
+
+[[package]]
+name = "rlx-cpu"
+version = "0.2.0"
+dependencies = [
+ "half",
+ "rayon",
+ "rlx-gguf",
+ "rlx-ir",
+ "rlx-opt",
+]
+
+[[package]]
+name = "rlx-driver"
+version = "0.2.0"
+dependencies = [
+ "half",
+ "rlx-ir",
+]
+
+[[package]]
+name = "rlx-fusion"
+version = "0.2.0"
+dependencies = [
+ "rlx-ir",
+]
+
+[[package]]
+name = "rlx-gguf"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "half",
+]
+
+[[package]]
+name = "rlx-ir"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "smallvec",
+]
+
+[[package]]
+name = "rlx-linalg"
+version = "0.2.0"
+dependencies = [
+ "rlx-cpu",
+ "rlx-ir",
+ "rlx-metal",
+ "rlx-mlx",
+]
+
+[[package]]
+name = "rlx-macros"
+version = "0.2.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "rlx-metal"
+version = "0.2.0"
+dependencies = [
+ "bytemuck",
+ "core-graphics-types 0.1.3",
+ "foreign-types 0.5.0",
+ "half",
+ "metal 0.30.0",
+ "objc",
+ "rlx-cpu",
+ "rlx-ir",
+ "rlx-opt",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rlx-mlx"
+version = "0.2.0"
+dependencies = [
+ "cc",
+ "cmake",
+ "half",
+ "rlx-cpu",
+ "rlx-gguf",
+ "rlx-ir",
+ "rlx-opt",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rlx-opt"
+version = "0.2.0"
+dependencies = [
+ "rlx-autodiff",
+ "rlx-compile",
+ "rlx-fusion",
+ "rlx-ir",
+]
+
+[[package]]
+name = "rlx-runtime"
+version = "0.2.0"
+dependencies = [
+ "half",
+ "rlx-cpu",
+ "rlx-driver",
+ "rlx-ir",
+ "rlx-linalg",
+ "rlx-macros",
+ "rlx-metal",
+ "rlx-mlx",
+ "rlx-opt",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rmp"
 version = "0.8.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4368,6 +4534,9 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "socket2"
@@ -5402,7 +5571,7 @@ dependencies = [
  "libc",
  "libloading",
  "log",
- "metal",
+ "metal 0.32.0",
  "naga",
  "ndk-sys",
  "objc",
@@ -5998,6 +6167,7 @@ dependencies = [
  "ndarray",
  "plotters",
  "rayon",
+ "rlx",
  "safetensors",
  "serde",
  "serde_json",
