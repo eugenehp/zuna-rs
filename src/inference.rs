@@ -26,7 +26,7 @@ use burn::prelude::*;
 
 use crate::{
     config::{DataConfig, ModelConfig},
-    data::{load_batch, load_from_fif, invert_reshape, FifInfo, InputBatch},
+    data::{load_batch, load_from_fif, invert_reshape_tensor as invert_reshape, FifInfo, InputBatch},
     encoder::{EncodingResult, EpochEmbedding},
     model::{encoder_decoder::EncoderDecoder, rope::RotaryEmbedding},
     weights::load_model,
@@ -214,11 +214,7 @@ impl<B: Backend> ZunaInference<B> {
         data_norm:  f32,
     ) -> anyhow::Result<InferenceResult> {
         let t_pp = Instant::now();
-        let batches = load_batch::<B>(
-            batch_path.to_str().context("batch path not valid UTF-8")?,
-            &self.data_cfg,
-            &self.device,
-        )?;
+        let batches = load_batch::<B>(batch_path, &self.data_cfg, &self.device)?;
         let ms_preproc = t_pp.elapsed().as_secs_f64() * 1000.0;
 
         let t_inf = Instant::now();
@@ -261,11 +257,7 @@ impl<B: Backend> ZunaInference<B> {
         batch_path: &Path,
     ) -> anyhow::Result<EncodingResult> {
         let t_pp = Instant::now();
-        let batches = load_batch::<B>(
-            batch_path.to_str().context("batch path not valid UTF-8")?,
-            &self.data_cfg,
-            &self.device,
-        )?;
+        let batches = load_batch::<B>(batch_path, &self.data_cfg, &self.device)?;
         let ms_preproc = t_pp.elapsed().as_secs_f64() * 1000.0;
 
         let t_enc = Instant::now();

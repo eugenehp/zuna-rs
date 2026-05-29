@@ -28,6 +28,7 @@
 //! plus the per-batch token values) and feed the result as the encoder's
 //! `x` input.
 
+use rlx::ir::GraphExt;
 use rlx::ops::Activation;
 use rlx::prelude::*;
 

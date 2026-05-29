@@ -36,9 +36,7 @@ pub fn build_rope_table(
     table
 }
 
-/// Build the per-token `(cos, sin)` tensors for a sequence of length `s2`,
-/// matching the burn implementation's `build_freqs_4d` + `apply_rope`
-/// extraction layout:
+/// Build the per-token `(cos, sin)` tensors for a sequence of length `s2`:
 /// * `cos` — `[1, s2, 1, head_dim/2]`
 /// * `sin` — `[1, s2, 1, head_dim/2]`
 ///
@@ -79,7 +77,7 @@ pub fn precompute_rope(
 
 /// Interleave register tokens with real tokens on the CPU.
 ///
-/// Equivalent to the Burn encoder's "register prepend" step:
+/// "Register prepend" step:
 /// ```text
 /// for each i in 0..s:
 ///   out[i*2]   = registers           // [input_dim]
@@ -121,9 +119,8 @@ pub fn preinterleave(
     out
 }
 
-/// `tok_idx_interleaved = repeat_interleave_rows(tok_idx, df + 1)`.
-/// Equivalent to the Burn code's `tok_idx.repeat_interleave(repeats=2, dim=1)`
-/// for the `downsample_factor=1` case.
+/// Repeat each row `df + 1` times: `[s, 4]` → `[s * (df + 1), 4]`.
+/// PyTorch equivalent: `tok_idx.repeat_interleave(repeats=df+1, dim=0)`.
 pub fn repeat_token_idx(tok_idx: &[i32], s: usize, downsample_factor: usize) -> Vec<i32> {
     let stride = downsample_factor + 1;
     assert_eq!(tok_idx.len(), s * 4);
@@ -139,12 +136,8 @@ pub fn repeat_token_idx(tok_idx: &[i32], s: usize, downsample_factor: usize) -> 
 }
 
 /// Sample standard Normal noise into a fresh `Vec<f32>` of `n` elements
-/// using a deterministic seed (xorshift64*) — matches a single specific
-/// seed across runs so parity tests are reproducible.
-///
-/// Burn's `Tensor::random` uses its own (non-deterministic) RNG; for the
-/// parity harness we usually pass `seed=Some(...)` to both sides to keep
-/// initial conditions identical.
+/// using a deterministic xorshift64* seed. Reproducible across runs;
+/// pair with a fixed `seed` when bit-comparing against another runtime.
 pub fn sample_normal(n: usize, sigma: f32, seed: u64) -> Vec<f32> {
     let mut s = if seed == 0 { 0xCAFEF00DD15EA5E5 } else { seed };
     let mut out = Vec::with_capacity(n);

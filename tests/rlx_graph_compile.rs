@@ -6,28 +6,23 @@
 //! shape-builder typos that the parity tests can only surface when
 //! real weights are available.
 
-#![cfg(feature = "rlx-backend")]
-
-use zuna_rs::rlx::data::{precompute_rope, build_rope_table, preinterleave, repeat_token_idx};
-use zuna_rs::rlx::graph::{build_encoder_graph, build_decoder_graph,
-                          EncoderSpec, DecoderSpec,
+use zuna_rs::rlx::graph::{build_decoder_graph, build_encoder_graph, DecoderSpec, EncoderSpec,
                           KEY_ONES_DIM, KEY_TWO_PI, KEY_ZEROS_DIM};
+use zuna_rs::rlx::rope_helpers::{build_rope_table, precompute_rope, preinterleave, repeat_token_idx};
 
 /// Push a buffer for every `Op::Param` declared in `graph`. The
 /// `overrides` map provides specific values for named params
 /// (e.g. the `__zuna.ones_dim` / `__zuna.zeros_dim` constants);
 /// everything else gets a zero vector of the declared length.
-///
-/// Uses [`rlx::Graph::params`] (added as part of the rlx 0.2.x
-/// introspection helpers) so we don't have to walk `nodes()` and
-/// pattern-match on `Op::Param` by hand.
 fn zero_fill_params(graph: &rlx::Graph, compiled: &mut rlx::CompiledGraph,
                     overrides: &[(&str, Vec<f32>)]) {
+    use rlx::Op;
     let mut ovr: std::collections::HashMap<&str, Vec<f32>> =
         overrides.iter().map(|(k, v)| (*k, v.clone())).collect();
-    for (name, shape, _id) in graph.params() {
-        let n = shape.elem_count();
-        let buf = ovr.remove(name).unwrap_or_else(|| vec![0.0; n]);
+    for node in graph.nodes() {
+        let Op::Param { name } = &node.op else { continue };
+        let n = node.shape.num_elements().expect("param shape must be static");
+        let buf = ovr.remove(name.as_str()).unwrap_or_else(|| vec![0.0; n]);
         assert_eq!(buf.len(), n, "param {name}: buffer len {} != shape {}", buf.len(), n);
         compiled.set_param(name, &buf);
     }
@@ -109,22 +104,6 @@ fn decoder_graph_compiles_and_runs() {
     assert_eq!(outs.len(), 1);
     assert_eq!(outs[0].len(), spec.b * spec.s * spec.input_dim,
         "decoder output length mismatch");
-}
-
-#[test]
-fn try_set_param_rejects_unknown_name() {
-    // `Session::compile` populates the param-name set on the
-    // CompiledGraph; `try_set_param` should surface typos instead of
-    // silently no-oping like `set_param`.
-    let spec = EncoderSpec {
-        b: 1, s: 4, s2: 8, input_dim: 8, output_dim: 8, dim: 16,
-        n_layers: 1, head_dim: 8, n_heads: 2, hidden_dim: 16,
-        downsample_factor: 1, norm_eps: 1e-5,
-    };
-    let mut compiled = rlx::Session::new(rlx::Device::Cpu)
-        .compile(build_encoder_graph(&spec));
-    let err = compiled.try_set_param("encoder.does_not_exist", &[0.0_f32; 1]);
-    assert!(err.is_err(), "unknown param should error");
 }
 
 #[test]

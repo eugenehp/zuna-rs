@@ -1,7 +1,8 @@
 //! CSV and raw-tensor loading for ZUNA inference.
 //!
 //! Three entry points, all producing the same `Vec<InputBatch<B>>` that
-//! [`ZunaEncoder`](crate::encoder::ZunaEncoder) consumes:
+//! The ZUNA encoder (`zuna_rs::rlx::ZunaEncoder`, or `zuna_rs::ZunaEncoder` when
+//! built with RLX-only defaults) consumes:
 //!
 //! | Function | Input |
 //! |---|---|
@@ -43,12 +44,11 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{bail, Context};
-use burn::prelude::*;
 use ndarray::Array2;
 
 use crate::channel_positions::{channel_xyz, nearest_channel, normalise};
 use crate::config::DataConfig;
-use crate::data::{build_tok_idx, chop_and_reshape, discretize_chan_pos, InputBatch};
+use crate::data::PreprocessedEpoch;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public types
@@ -97,9 +97,8 @@ pub enum PaddingStrategy {
     /// dropped from the output instead of being synthesised.
     ///
     /// The returned data will have fewer channels than `target_channels` when
-    /// any targets are missing.  The encoder handles variable-length inputs
-    /// natively, so the resulting [`InputBatch`](crate::data::InputBatch) is
-    /// fully valid.
+    /// any targets are missing. The encoder handles variable-length inputs
+    /// natively.
     NoPadding,
 }
 
@@ -179,15 +178,14 @@ pub struct CsvInfo {
 
 /// Load EEG data from a CSV file and run the full ZUNA preprocessing pipeline.
 ///
-/// The pipeline is identical to [`load_from_fif`](crate::data::load_from_fif):
+/// The pipeline is identical to [`preprocess_fif_cpu`](crate::data::preprocess_fif_cpu):
 /// resample (if needed) → 0.5 Hz highpass FIR → average reference →
 /// global z-score → epoch (5 s) → baseline correction → ÷ data_norm.
-pub fn load_from_csv<B: Backend>(
+pub fn load_from_csv(
     path:     &Path,
     opts:     &CsvLoadOptions,
     data_cfg: &DataConfig,
-    device:   &B::Device,
-) -> anyhow::Result<(Vec<InputBatch<B>>, CsvInfo)> {
+) -> anyhow::Result<(Vec<PreprocessedEpoch>, CsvInfo)> {
     // ── Parse CSV ─────────────────────────────────────────────────────────────
     let (csv_names, raw_data) = parse_csv(path)
         .with_context(|| format!("parsing CSV {}", path.display()))?;
@@ -238,7 +236,7 @@ pub fn load_from_csv<B: Backend>(
     // ── Run exg preprocessing pipeline ───────────────────────────────────────
     let pos_arr = positions_to_array(&padded_positions, n_ch_final);
     let batches = run_pipeline(
-        padded_data, pos_arr, opts.sample_rate, opts.data_norm, data_cfg, device,
+        padded_data, pos_arr, opts.sample_rate, opts.data_norm, data_cfg,
     )?;
     let n_epochs = batches.len();
 
@@ -264,14 +262,13 @@ pub fn load_from_csv<B: Backend>(
 ///
 /// The data must be raw (unprocessed) EEG in volts; the full exg pipeline is
 /// applied internally.  The shape is `[n_channels, n_samples]`.
-pub fn load_from_raw_tensor<B: Backend>(
+pub fn load_from_raw_tensor(
     data:      Array2<f32>,
     positions: &[[f32; 3]],
     sample_rate: f32,
     data_norm:   f32,
     data_cfg:    &DataConfig,
-    device:      &B::Device,
-) -> anyhow::Result<Vec<InputBatch<B>>> {
+) -> anyhow::Result<Vec<PreprocessedEpoch>> {
     let n_ch = data.nrows();
     anyhow::ensure!(
         positions.len() == n_ch,
@@ -284,7 +281,7 @@ pub fn load_from_raw_tensor<B: Backend>(
     }
 
     let pos_arr = positions_to_array(positions, n_ch);
-    run_pipeline(data, pos_arr, sample_rate, data_norm, data_cfg, device)
+    run_pipeline(data, pos_arr, sample_rate, data_norm, data_cfg)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -297,15 +294,14 @@ pub fn load_from_raw_tensor<B: Backend>(
 /// Channels not found in any montage (e.g. custom names) get the centroid of
 /// the remaining channels as their position, which keeps them encodable.
 /// Pass explicit XYZ via `position_overrides` to override any channel.
-pub fn load_from_named_tensor<B: Backend>(
+pub fn load_from_named_tensor(
     data:               Array2<f32>,
     channel_names:      &[&str],
     sample_rate:        f32,
     data_norm:          f32,
     position_overrides: &HashMap<String, [f32; 3]>,
     data_cfg:           &DataConfig,
-    device:             &B::Device,
-) -> anyhow::Result<Vec<InputBatch<B>>> {
+) -> anyhow::Result<Vec<PreprocessedEpoch>> {
     let n_ch = data.nrows();
     anyhow::ensure!(
         channel_names.len() == n_ch,
@@ -322,7 +318,7 @@ pub fn load_from_named_tensor<B: Backend>(
     let positions = resolve_positions(&names, position_overrides);
     let pos_arr   = positions_to_array(&positions, n_ch);
 
-    run_pipeline(data, pos_arr, sample_rate, data_norm, data_cfg, device)
+    run_pipeline(data, pos_arr, sample_rate, data_norm, data_cfg)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -635,14 +631,13 @@ fn position_for_missing(
 /// Pipeline (identical to [`load_from_fif`](crate::data::load_from_fif)):
 /// resample → 0.5 Hz HP FIR → average reference → global z-score →
 /// epoch (5 s) → baseline correction → ÷ data_norm
-fn run_pipeline<B: Backend>(
+fn run_pipeline(
     data:        Array2<f32>,    // [C, T] raw EEG in volts
     pos_arr:     Array2<f32>,    // [C, 3] metres
     sample_rate: f32,
     data_norm:   f32,
     data_cfg:    &DataConfig,
-    device:      &B::Device,
-) -> anyhow::Result<Vec<InputBatch<B>>> {
+) -> anyhow::Result<Vec<PreprocessedEpoch>> {
     use exg::PipelineConfig;
 
     let cfg = PipelineConfig { data_norm, ..PipelineConfig::default() };
@@ -652,25 +647,42 @@ fn run_pipeline<B: Backend>(
         bail!("recording produced zero epochs (likely shorter than the 5 s minimum epoch)");
     }
 
+    let tf = data_cfg.num_fine_time_pts;
+    let bins = data_cfg.num_bins as f32;
     let mut batches = Vec::with_capacity(epochs.len());
-    for (eeg_arr, pos_out) in epochs {
+    for (eeg_arr, pos_arr) in epochs {
         let (c, t) = eeg_arr.dim();
-        let eeg_data: Vec<f32> = eeg_arr.iter().copied().collect();
-        let eeg = Tensor::<B, 2>::from_data(TensorData::new(eeg_data, vec![c, t]), device);
+        let tc = t / tf;
 
-        let pos_data: Vec<f32> = pos_out.iter().copied().collect();
-        let chan_pos = Tensor::<B, 2>::from_data(TensorData::new(pos_data, vec![c, 3]), device);
+        // Discretise channel positions into bin indices.
+        let disc: Vec<i32> = pos_arr.iter().enumerate().map(|(i, &v)| {
+            let axis = i % 3;
+            let lo = data_cfg.xyz_min[axis];
+            let hi = data_cfg.xyz_max[axis];
+            let norm = (v - lo) / (hi - lo);
+            (norm * bins).min(bins - 1.0).max(0.0) as i32
+        }).collect();
 
-        let chan_pos_disc = discretize_chan_pos(chan_pos.clone(), data_cfg, device);
-        let tc = t / data_cfg.num_fine_time_pts;
-
-        let (eeg_tokens, _, posd, t_coarse) =
-            chop_and_reshape(eeg, chan_pos.clone(), chan_pos_disc, data_cfg.num_fine_time_pts);
-
-        let tok_idx       = build_tok_idx(posd, t_coarse);
-        let encoder_input = eeg_tokens.unsqueeze_dim::<3>(0);
-
-        batches.push(InputBatch { encoder_input, tok_idx, chan_pos, n_channels: c, tc });
+        // Chop + reshape `[C, T]` → `[C×tc, tf]`; build matching tok_idx.
+        let s = c * tc;
+        let mut eeg_tokens = vec![0f32; s * tf];
+        let mut tok_idx = vec![0i32; s * 4];
+        for ch in 0..c {
+            for ti in 0..tc {
+                let token = ch * tc + ti;
+                for f in 0..tf {
+                    eeg_tokens[token * tf + f] = eeg_arr[[ch, ti * tf + f]];
+                }
+                tok_idx[token * 4]     = disc[ch * 3];
+                tok_idx[token * 4 + 1] = disc[ch * 3 + 1];
+                tok_idx[token * 4 + 2] = disc[ch * 3 + 2];
+                tok_idx[token * 4 + 3] = ti as i32;
+            }
+        }
+        let chan_pos: Vec<f32> = pos_arr.iter().copied().collect();
+        batches.push(PreprocessedEpoch {
+            eeg_tokens, tok_idx, chan_pos, s, tf, n_channels: c, tc,
+        });
     }
 
     Ok(batches)

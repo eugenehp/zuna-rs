@@ -32,7 +32,7 @@ use burn::{prelude::*, tensor::Distribution};
 
 use crate::{
     config::{DataConfig, ModelConfig},
-    data::invert_reshape,
+    data::invert_reshape_tensor as invert_reshape,
     encoder::{EncodingResult, EpochEmbedding},
     inference::{EpochOutput, InferenceResult},
     model::{decoder::DecoderTransformer, rope::RotaryEmbedding},

@@ -7,9 +7,9 @@ use std::path::Path;
 use anyhow::Context;
 
 use crate::config::ModelConfig;
-use super::data as rdata;
 use super::encoder::EpochEmbedding;
 use super::graph::{build_decoder_graph, DecoderSpec};
+use super::rope_helpers as rdata;
 use super::weights::{apply_params, build_decoder_params, load_safetensors, ParamMap};
 
 /// One reconstructed epoch, mirroring `crate::inference::EpochOutput`.

@@ -16,12 +16,8 @@
 //! it explicitly.
 //!
 //! ```text
-//! cargo test --release --no-default-features \
-//!     --features ndarray,rlx-backend,rlx-cpu \
-//!     --test parity_rlx_vs_python -- --nocapture
+//! cargo test --release --test parity_rlx_vs_python -- --nocapture
 //! ```
-
-#![cfg(feature = "rlx-backend")]
 
 use std::path::{Path, PathBuf};
 

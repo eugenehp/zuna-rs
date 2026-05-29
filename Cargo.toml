@@ -1,14 +1,18 @@
 [package]
 name = "zuna-rs"
-version = "0.1.4"
+version = "0.2.0"
 edition = "2021"
-description = "ZUNA EEG Foundation Model — inference in Rust with Burn ML"
+description = "ZUNA EEG Foundation Model — inference in Rust (Burn and/or RLX)"
 keywords      = ["exg", "foundational", "BCI", "GPU", "CPU"]
 authors       = ["Eugene Hauptmann"]
 license-file  = "LICENSE"
 homepage      = "https://github.com/eugenehp/zuna-rs"
 repository    = "https://github.com/eugenehp/zuna-rs"
 documentation = "https://docs.rs/zuna-rs"
+
+autoexamples = false
+autotests    = false
+autobins     = false
 
 exclude = [
     'data/*',
@@ -22,140 +26,119 @@ path = "src/lib.rs"
 [[bin]]
 name = "infer"
 path = "src/bin/infer.rs"
-
-# ── Examples ──────────────────────────────────────────────────────────────────
-# Run with: cargo run --example <name> --release -- [args]
-# GPU variant: cargo run --example <name> --release \
-#                --no-default-features --features wgpu -- --device gpu
-
-[[example]]
-name = "infer"
-path = "examples/infer.rs"
-# default features (ndarray CPU) are sufficient; add wgpu for --device gpu
-
-[[example]]
-name = "embed"
-path = "examples/embed.rs"
-# default features (ndarray CPU) are sufficient; add wgpu for --device gpu
-
-[[example]]
-name = "embedding_api"
-path = "examples/embedding_api.rs"
-# Minimal embedding API showcase — no CLI flags needed, runs on CPU by default.
-# GPU: cargo run --example embedding_api --release \
-#        --no-default-features --features wgpu
-
-[[example]]
-name = "csv_embed"
-path = "examples/csv_embed.rs"
-# Embed EEG from a CSV file with configurable channels and padding strategy.
-# cargo run --example csv_embed --release -- --csv data/sample.csv
-
-[[example]]
-name = "channel_bench"
-path = "examples/channel_bench.rs"
-# Benchmark 26 channel-padding configurations and produce UMAP figures.
-# cargo run --example channel_bench --release
-
-[[example]]
-name = "backend_bench"
-path = "examples/backend_bench.rs"
-# Backend × channel-count sweep benchmark.
-# cargo run --example backend_bench --release --features ndarray,mlx
-
-[[example]]
-name = "parallel_bench"
-path = "examples/parallel_bench.rs"
+required-features = ["rlx"]
 
 [[bin]]
 name = "download_weights"
 path = "src/bin/download_weights.rs"
 required-features = ["hf-download"]
 
+[[bin]]
+name = "fif_info"
+path = "src/bin/fif_info.rs"
+
+[[bin]]
+name = "gen_sample_csv"
+path = "src/bin/gen_sample_csv.rs"
+
+[[example]]
+name = "backend_bench"
+path = "examples/backend_bench.rs"
+required-features = ["burn", "ndarray"]
+
+[[example]]
+name = "backend_compare"
+path = "examples/backend_compare.rs"
+required-features = ["rlx", "rlx-cpu"]
+
+# ── Tests ──────────────────────────────────────────────────────────────────
+[[test]]
+name = "rlx_graph_compile"
+path = "tests/rlx_graph_compile.rs"
+required-features = ["rlx"]
+
+[[test]]
+name = "mlx_op_parity"
+path = "tests/mlx_op_parity.rs"
+required-features = ["rlx", "mlx"]
+
+[[test]]
+name = "parity_rlx_vs_python"
+path = "tests/parity_rlx_vs_python.rs"
+required-features = ["rlx"]
+
+[[test]]
+name = "parity_rlx_vs_burn"
+path = "tests/parity_rlx_vs_burn.rs"
+required-features = ["burn", "rlx", "ndarray", "rlx-cpu"]
+
 [features]
-default = ["ndarray", "rlx-backend"]
-# ── Burn backends (legacy reference implementation) ─────────────────────────
-# CPU backend — Rayon multi-threading + SIMD enabled by default
-ndarray         = ["dep:burn-ndarray", "burn/ndarray"]
-# macOS: swap matmul impl to Apple Accelerate (multi-threaded, very fast on Apple Silicon)
-# Recommended: cargo build --release --features blas-accelerate
-blas-accelerate = ["burn-ndarray?/blas-accelerate"]
-# Linux: use system OpenBLAS (apk add openblas-dev)
-openblas-system = ["burn-ndarray?/blas-openblas-system"]
-# GPU backend — wgpu on Metal (macOS) or Vulkan (Linux with GPU)
-wgpu            = ["burn/wgpu"]
-# GPU backend with f16 (half-precision) — 2× less memory, faster on supported GPUs.
-# Requires Metal (macOS) or Vulkan (Linux).  Not compatible with ndarray (CPU).
-# Usage: cargo build --release --no-default-features --features wgpu-f16
-wgpu-f16        = ["burn/wgpu"]
-# MLX backend — Apple Silicon GPU via Apple's MLX framework (macOS only).
-# Usage: cargo build --release --no-default-features --features mlx
-mlx             = ["dep:burn-mlx"]
-# MLX backend with f16 (half-precision) — faster on Apple Silicon.
-mlx-f16         = ["dep:burn-mlx"]
+# Default: RLX on CPU only — no Burn dependency.
+# Burn reference path: `--features burn,ndarray` (plus optional `wgpu`, `mlx`, …).
+default = ["rlx", "rlx-cpu"]
 
-# ── RLX backend (new implementation; coexists with Burn for parity) ─────────
-# Enables the `zuna_rs::rlx` module — the in-progress RLX migration of the
-# encoder, decoder, and inference pipeline. Required for the parity test.
-rlx-backend     = ["dep:rlx"]
-# RLX CPU backend (default for parity testing).
-rlx-cpu         = ["rlx?/cpu"]
-# RLX Apple Metal backend (Apple Silicon native).
-rlx-metal       = ["rlx?/metal"]
-# RLX Apple MLX backend (vendored, git source only).
-rlx-mlx         = ["rlx?/mlx"]
-# RLX Accelerate (macOS).
-rlx-accelerate  = ["rlx?/blas-accelerate"]
+# ── Inference engines (enable one or both) ─────────────────────────────────
+# `burn` — optional; pulls burn 0.20 + model at crate root (`ZunaEncoder<B>`, …).
+burn = ["dep:burn"]
+# `rlx` — optional; pulls rlx from crates.io (`zuna_rs::rlx::*`).
+rlx  = ["dep:rlx"]
 
-# HuggingFace Hub downloader — requires TLS; disable on musl/Alpine (no static openssl)
-hf-download     = ["dep:hf-hub"]
+# ── Burn backends (each requires `burn`; CPU needs `ndarray` too) ──────────
+ndarray         = ["burn", "dep:burn-ndarray", "burn/ndarray"]
+blas-accelerate = ["burn", "ndarray", "burn-ndarray?/blas-accelerate"]
+openblas-system = ["burn", "ndarray", "burn-ndarray?/blas-openblas-system"]
+wgpu            = ["burn", "burn/wgpu"]
+wgpu-f16        = ["burn", "burn/wgpu"]
+burn-mlx        = ["burn", "dep:burn-mlx"]
+mlx             = ["burn", "burn-mlx"]
+mlx-f16         = ["burn", "burn-mlx"]
+
+# ── RLX backends (forwarded to the rlx crate) ──────────────────────────────
+rlx-cpu             = ["rlx", "rlx/cpu"]
+rlx-blas-accelerate = ["rlx", "rlx/blas-accelerate"]
+rlx-blas-mkl        = ["rlx", "rlx/blas-mkl"]
+rlx-blas-openblas   = ["rlx", "rlx/blas-openblas"]
+rlx-metal           = ["rlx", "rlx/metal"]
+rlx-mlx             = ["rlx", "rlx/mlx"]
+# TODO: enable RLX wgpu in CI/benchmarks once rlx-wgpu lowers FusedResidualRmsNorm.
+rlx-gpu             = ["rlx", "rlx/gpu"]
+rlx-cuda            = ["rlx", "rlx/cuda"]
+rlx-rocm            = ["rlx", "rlx/rocm"]
+rlx-tpu             = ["rlx", "rlx/tpu"]
+rlx-apple-silicon   = ["rlx", "rlx/apple-silicon"]
+rlx-nvidia          = ["rlx", "rlx/nvidia"]
+
+# Shorthand aliases (RLX)
+cpu             = ["rlx-cpu"]
+metal           = ["rlx-metal"]
+gpu             = ["rlx-gpu"]
+cuda            = ["rlx-cuda"]
+rocm            = ["rlx-rocm"]
+tpu             = ["rlx-tpu"]
+apple-silicon   = ["rlx-apple-silicon"]
+nvidia          = ["rlx-nvidia"]
+
+hf-download = ["dep:hf-hub"]
 
 [dependencies]
-burn = { version = "0.20.1", default-features = false, features = ["std", "simd"] }
-# Direct dep so we can opt-in to multi-threads + simd that burn strips via default-features=false
+burn = { version = "0.20.1", default-features = false, features = ["std", "simd"], optional = true }
 burn-ndarray = { version = "0.20.1", default-features = false, features = ["std", "simd", "multi-threads"], optional = true }
-# MLX backend — Apple Silicon GPU via Apple's MLX framework
 burn-mlx = { version = "0.1", git = "https://github.com/eidola-ai/burn-mlx", optional = true }
 
-# RLX compiler/runtime — alternate inference backend (in-progress migration).
-# Optional so the legacy Burn build keeps working unchanged; enable with
-# --features rlx-backend (on by default in the workspace default set).
-rlx = { path = "../rlx/rlx", default-features = false, features = ["cpu"], optional = true }
+rlx = { version = "0.2", default-features = false, optional = true }
 
-# EEG preprocessing (FIF reader + full pipeline in pure Rust).
-# exg = { git = "https://github.com/eugenehp/exg", tag = "0.0.1", version = "0.0.1"}
 exg = { version = "0.0.3", default-features = false }
-
-# ndarray — used to pass Array2<f32> between exg and Burn tensors.
 ndarray = "0.17"
-
-# Read HuggingFace safetensors weight files and I/O batches.
 safetensors = "0.7"
-
-# bf16 byte conversion for weight loading.
 half = { version = "2", features = ["bytemuck"] }
-
-
-# Thread-pool configuration (Rayon is already pulled in by burn-ndarray; this
-# direct dep lets us call rayon::ThreadPoolBuilder to set the thread count).
 rayon = "1"
-
-# CLI argument parsing.
 clap = { version = "4", features = ["derive", "env"] }
-
-# JSON for loading config.json from HuggingFace.
 serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-# Error handling.
 anyhow = "1.0.102"
-
-# HuggingFace Hub client — optional; only compiled with --features hf-download.
-# Uses ureq (pure-Rust TLS via rustls). Not available on musl Alpine (no static openssl).
 hf-hub = { version = "0.5", default-features = false, features = ["ureq"], optional = true }
 
 [dev-dependencies]
-# Chart generation in examples
 plotters = { version = "0.3", default-features = false, features = [
     "bitmap_backend", "bitmap_encoder",
     "ttf",
@@ -165,13 +148,8 @@ plotters = { version = "0.3", default-features = false, features = [
 [profile.release]
 opt-level = 3
 lto = "thin"
-codegen-units = 1   # single codegen unit for better inter-proc optimisation
-strip = true        # strip debug symbols — smaller binary
+codegen-units = 1
+strip = true
 
-# ── Patch cubek-matmul to add graceful fallback on Apple Silicon ──────────────
-# The published 0.1.1 panics when the SimpleCyclicCmma tile (40 KB shared mem)
-# exceeds Apple Silicon Metal's 32 KB limit.  Our local copy extends the `auto`
-# fallback chain: SimpleCyclicCmma → SimpleUnit → Naive.
 [patch.crates-io]
-# cubek-matmul = { path = "../vendor/cubek-matmul" }
 cubek-matmul = { git = "https://github.com/eugenehp/cubek.git", branch = "cubek-matmul", package = "cubek-matmul" }

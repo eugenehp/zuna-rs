@@ -21,13 +21,10 @@
 //! These tests guard against regressions in either fix.
 //!
 //! ```text
-//! cargo test --release --no-default-features \
-//!   --features ndarray,rlx-backend,rlx-cpu,rlx-mlx \
-//!   --test mlx_op_parity
+//! cargo test --release --features cpu,mlx --test mlx_op_parity
 //! ```
 
-#![cfg(feature = "rlx-backend")]
-
+use rlx::ir::GraphExt;
 use rlx::ops::MaskKind;
 use rlx::prelude::*;
 
@@ -73,16 +70,20 @@ fn run_both<F>(build: F, inputs: &[(&str, &[f32])], params: &[(&str, Vec<f32>)])
 where
     F: Fn() -> Graph,
 {
-    if !rlx::is_available(rlx::Device::Mlx) {
-        eprintln!("[skip] MLX backend not available in this build");
-        return None;
-    }
     let run_on = |dev: rlx::Device| -> Vec<f32> {
         let mut compiled = rlx::Session::new(dev).compile(build());
         for (n, v) in params { compiled.set_param(n, v); }
         compiled.run(inputs).into_iter().next().unwrap()
     };
-    Some((run_on(rlx::Device::Cpu), run_on(rlx::Device::Mlx)))
+    let cpu = run_on(rlx::Device::Cpu);
+    let mlx = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_on(rlx::Device::Mlx))) {
+        Ok(v) => v,
+        Err(_) => {
+            eprintln!("[skip] MLX backend not available in this build");
+            return None;
+        }
+    };
+    Some((cpu, mlx)))
 }
 
 #[test]

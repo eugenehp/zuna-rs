@@ -1,83 +1,37 @@
 //! # zuna-rs — ZUNA EEG Foundation Model inference in Rust
 //!
 //! Pure-Rust inference for the [ZUNA](https://huggingface.co/Zyphra/ZUNA)
-//! EEG foundation model, built on [Burn 0.20](https://burn.dev) and
-//! [exg](https://github.com/eugenehp/exg) for FIF preprocessing.
+//! EEG foundation model. Two inference engines are available behind Cargo
+//! features:
 //!
-//! ## Three entry points
+//! | feature | module | runtime |
+//! |---------|--------|---------|
+//! | `burn`  | crate root (`ZunaEncoder`, …) | [Burn](https://burn.dev) 0.20 |
+//! | `rlx`   | [`rlx`] | [RLX](https://docs.rs/rlx) compiler/runtime |
 //!
-//! | Type | Loads | Use case |
-//! |---|---|---|
-//! | [`ZunaInference`] | encoder + decoder | full encode → diffuse → decode pipeline |
-//! | [`ZunaEncoder`]   | encoder only      | produce latent embeddings, save memory |
-//! | [`ZunaDecoder`]   | decoder only      | reconstruct from stored embeddings |
+//! FIF preprocessing is shared ([`preprocess_fif_cpu`]) via [exg](https://github.com/eugenehp/exg).
 //!
-//! ## Quick start — full pipeline
+//! ## Backends
 //!
-//! ```rust,ignore
-//! use zuna_rs::{ZunaInference, InferenceResult};
+//! **Burn** (with `--features burn,ndarray`): `ndarray`, `blas-accelerate`,
+//! `wgpu`, `burn-mlx` / `mlx`.
 //!
-//! let (model, _ms) = ZunaInference::<B>::load(
-//!     Path::new("config.json"),
-//!     Path::new("model.safetensors"),
-//!     device,
-//! )?;
-//! let result: InferenceResult = model.run_fif(Path::new("recording.fif"), 50, 1.0, 10.0)?;
-//! result.save_safetensors("output.safetensors")?;
+//! **RLX** (with `--features rlx`): `cpu`, `metal`, `mlx`, `gpu`, `cuda`,
+//! `rocm`, `tpu`, and BLAS variants.
+//!
+//! Compare both engines (add `--features burn,ndarray` for the Burn side):
+//!
+//! ```text
+//! cargo run --example backend_compare --release \
+//!     --no-default-features \
+//!     --features burn,rlx,ndarray,rlx-cpu,rlx-metal,metal,wgpu,mlx,rlx-mlx
 //! ```
-//!
-//! ## Quick start — encode only
-//!
-//! ```rust,ignore
-//! use zuna_rs::{ZunaEncoder, EncodingResult};
-//!
-//! let (enc, _ms) = ZunaEncoder::<B>::load(
-//!     Path::new("config.json"),
-//!     Path::new("model.safetensors"),
-//!     device,
-//! )?;
-//! let result: EncodingResult = enc.encode_fif(Path::new("recording.fif"), 10.0)?;
-//! result.save_safetensors("data/embeddings.safetensors")?;
-//! ```
-//!
-//! ## Quick start — decode from stored embeddings
-//!
-//! ```rust,ignore
-//! use zuna_rs::{ZunaDecoder, encoder::EncodingResult};
-//!
-//! let embeddings = EncodingResult::load_safetensors("data/embeddings.safetensors")?;
-//! let (dec, _ms) = ZunaDecoder::<B>::load(
-//!     Path::new("config.json"),
-//!     Path::new("model.safetensors"),
-//!     device,
-//! )?;
-//! let result = dec.decode_embeddings(&embeddings, 50, 1.0, 10.0)?;
-//! result.save_safetensors("output.safetensors")?;
-//! ```
-//!
-//! ## Embedding regularisation
-//!
-//! The encoder uses an **MMD (Maximum Mean Discrepancy) bottleneck**: during
-//! training an MMD loss constrains the embedding distribution toward **N(0, I)**.
-//! At inference the bottleneck is a pure passthrough — no reparameterisation is
-//! applied.  Embeddings from [`ZunaEncoder`] or [`ZunaInference::encode_fif`]
-//! are therefore already in the regularised latent space and can be used
-//! directly for downstream tasks.
 
-// ── Thread configuration ─────────────────────────────────────────────────────
+// At least one inference engine must be enabled.
+#[cfg(not(any(feature = "burn", feature = "rlx")))]
+compile_error!("enable at least one inference engine: `rlx` (default) and/or `burn`");
 
-/// Configure the global Rayon thread pool used by the NdArray backend.
-///
-/// Call this **once**, before any model operations.  If `n` is `None` or `0`,
-/// Rayon uses all logical CPUs (its default).
-///
-/// Returns the actual number of threads in the pool.
-///
-/// # Example
-/// ```rust,ignore
-/// let n = zuna_rs::init_threads(Some(4));
-/// println!("Using {n} threads");
-/// ```
+/// Configure the global Rayon thread pool (Burn NdArray + RLX CPU).
 pub fn init_threads(n: Option<usize>) -> usize {
     let mut builder = rayon::ThreadPoolBuilder::new();
     if let Some(count) = n {
@@ -85,69 +39,69 @@ pub fn init_threads(n: Option<usize>) -> usize {
             builder = builder.num_threads(count);
         }
     }
-    // build_global returns Err if already initialised — that's fine.
     let _ = builder.build_global();
     rayon::current_num_threads()
 }
-
-// ── Internal modules ─────────────────────────────────────────────────────────
 
 pub mod channel_positions;
 pub mod config;
 pub mod csv_export;
 pub mod csv_loader;
 pub mod data;
-pub mod encoder;
-pub mod decoder;
-pub mod inference;
+
+#[cfg(feature = "burn")]
 pub mod model;
+
+#[cfg(feature = "burn")]
+pub mod encoder;
+
+#[cfg(feature = "burn")]
+pub mod decoder;
+
+#[cfg(feature = "burn")]
+pub mod inference;
+
+#[cfg(feature = "burn")]
 pub mod weights;
 
-/// Alternate inference implementation built on the [RLX] compiler/runtime.
-///
-/// Surfaces the same `ZunaInference` / `ZunaEncoder` / `ZunaDecoder`
-/// shape as the Burn-backed types at the crate root, but lives under
-/// `zuna_rs::rlx::*`. Both implementations agree to within FP32 ULP
-/// on every supported backend (CPU, Apple Metal, Apple MLX); the
-/// regression coverage is `tests/parity_rlx_vs_burn.rs` and
-/// `tests/parity_rlx_vs_python.rs`.
-///
-/// Enable with `--features rlx-backend` (default-on). To target a
-/// specific RLX backend, pair with one of `rlx-cpu` / `rlx-metal` /
-/// `rlx-mlx`.
-///
-/// [RLX]: https://github.com/MIT-RLX/rlx
-#[cfg(feature = "rlx-backend")]
+#[cfg(feature = "rlx")]
 pub mod rlx;
 
-// ── Flat re-exports ───────────────────────────────────────────────────────────
-//
-// Everything a downstream user needs is available as `zuna_rs::Foo` without
-// knowing the internal module layout.
+// ── Burn re-exports (crate root) ─────────────────────────────────────────────
 
-// Full pipeline
-pub use inference::{ZunaInference, EpochOutput, InferenceResult};
+#[cfg(feature = "burn")]
+pub use inference::{InferenceResult, ZunaInference};
 
-// Encoder-only
-pub use encoder::{ZunaEncoder, EpochEmbedding, EncodingResult};
+#[cfg(feature = "burn")]
+pub use encoder::{EpochEmbedding, EncodingResult, ZunaEncoder};
 
-// Decoder-only
+#[cfg(feature = "burn")]
 pub use decoder::ZunaDecoder;
 
-// Configs
-pub use config::{ModelConfig, DataConfig, InferConfig};
-
-// Data types needed for the lower-level API
-pub use data::{InputBatch, FifInfo, PreprocessedEpoch, PreprocessedFif, preprocess_fif_cpu, preprocessed_to_batch};
-
-// Channel position lookup
-pub use channel_positions::{channel_xyz, MontageLayout, montage_channels, nearest_channel, normalise};
-
-// CSV / tensor data loading
-pub use csv_loader::{
-    load_from_csv, load_from_raw_tensor, load_from_named_tensor,
-    PaddingStrategy, CsvLoadOptions, CsvInfo,
+// When Burn is off, lift the RLX API to the crate root (default build).
+#[cfg(all(feature = "rlx", not(feature = "burn")))]
+pub use rlx::{
+    EpochEmbedding, EpochOutput, InferenceResult, ZunaDecoder, ZunaEncoder, ZunaInference,
 };
 
-// CSV export from FIF
+// ── Shared types ───────────────────────────────────────────────────────────
+
+pub use config::{DataConfig, InferConfig, ModelConfig};
+
+pub use data::{
+    FifInfo, PreprocessedEpoch, PreprocessedFif, invert_reshape, preprocess_fif_cpu,
+};
+
+#[cfg(feature = "burn")]
+pub use data::{InputBatch, preprocessed_to_batch};
+
+pub use channel_positions::{
+    MontageLayout, channel_xyz, montage_channels, nearest_channel, normalise,
+};
+
+pub use csv_loader::{
+    CsvInfo, CsvLoadOptions, PaddingStrategy, load_from_csv, load_from_named_tensor,
+    load_from_raw_tensor,
+};
+
 pub use csv_export::fif_to_csv;

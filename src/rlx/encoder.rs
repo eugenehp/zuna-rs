@@ -7,8 +7,8 @@ use std::path::Path;
 use anyhow::Context;
 
 use crate::config::ModelConfig;
-use super::data as rdata;
 use super::graph::{build_encoder_graph, EncoderSpec};
+use super::rope_helpers as rdata;
 use super::weights::{apply_params, build_encoder_params, load_safetensors, ParamMap};
 
 /// One encoder-side embedding, mirroring `crate::encoder::EpochEmbedding`.

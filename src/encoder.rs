@@ -259,11 +259,7 @@ impl<B: Backend> ZunaEncoder<B> {
         batch_path: &Path,
     ) -> anyhow::Result<EncodingResult> {
         let t_pp = Instant::now();
-        let batches = load_batch::<B>(
-            batch_path.to_str().context("batch path not valid UTF-8")?,
-            &self.data_cfg,
-            &self.device,
-        )?;
+        let batches = load_batch::<B>(batch_path, &self.data_cfg, &self.device)?;
         let ms_preproc = t_pp.elapsed().as_secs_f64() * 1000.0;
 
         let t_enc = Instant::now();

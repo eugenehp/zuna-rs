@@ -1,57 +1,69 @@
-/// ZUNA EEG inference — thin CLI over [`zuna_rs::ZunaInference`].
-///
-/// All model logic lives in `src/inference.rs`.  This file is just argument
-/// parsing, display, and I/O.
-///
-/// Build — CPU (default; Apple Accelerate on macOS):
-///   cargo build --release [--features blas-accelerate]
-///
-/// Build — GPU (Metal on macOS, Vulkan on Linux):
-///   cargo build --release --no-default-features --features wgpu
-///
-/// Build — MLX (Apple Silicon native, macOS only):
-///   cargo build --release --no-default-features --features mlx
-///
-/// Build — multiple backends for runtime selection:
-///   cargo build --release --features ndarray,mlx
-///
-/// Usage:
-///   infer --weights <st> --config <json> --fif <fif> --output <st>
-///         [--device cpu|gpu|gpu-f16|mlx|mlx-f16]
-///         [--steps 50] [--cfg 1.0] [--data-norm 10.0] [--verbose]
+//! ZUNA EEG inference — thin CLI over [`zuna_rs::ZunaInference`].
+//!
+//! Build:
+//!   cargo build --release                              # CPU (default)
+//!   cargo build --release --features blas-accelerate   # macOS Accelerate
+//!   cargo build --release --features metal             # Apple Metal native
+//!   cargo build --release --features mlx               # Apple MLX
+//!
+//! Usage:
+//!   infer --weights <st> --config <json> --fif <fif> --output <st>
+//!         [--device cpu|metal|mlx|gpu|cuda]
+//!         [--steps 50] [--cfg 1.0] [--data-norm 10.0] [--verbose]
 
-use std::{path::Path, time::Instant};
-use burn::prelude::Backend;
+use std::path::Path;
+use std::time::Instant;
+
 use clap::{Parser, ValueEnum};
-use zuna_rs::ZunaInference;
 
-// ── CLI ───────────────────────────────────────────────────────────────────────
+use zuna_rs::rlx::{EpochOutput, ZunaInference};
+use zuna_rs::{DataConfig, preprocess_fif_cpu};
 
-#[derive(Debug, Clone, ValueEnum)]
-enum Device { Cpu, Gpu, GpuF16, Mlx, MlxF16 }
+// ── CLI ─────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum DeviceArg {
+    Cpu,
+    Metal,
+    Mlx,
+    Gpu,
+    Cuda,
+    Rocm,
+    Tpu,
+}
+
+impl DeviceArg {
+    fn into_rlx(self) -> rlx::Device {
+        match self {
+            Self::Cpu   => rlx::Device::Cpu,
+            Self::Metal => rlx::Device::Metal,
+            Self::Mlx   => rlx::Device::Mlx,
+            Self::Gpu   => rlx::Device::Gpu,
+            Self::Cuda  => rlx::Device::Cuda,
+            Self::Rocm  => rlx::Device::Rocm,
+            Self::Tpu   => rlx::Device::Tpu,
+        }
+    }
+}
 
 #[derive(Parser, Debug)]
-#[command(about = "ZUNA EEG model inference (Burn 0.20.1)")]
+#[command(about = "ZUNA EEG model inference (RLX runtime)")]
 struct Args {
     /// Compute device.
     #[arg(long, default_value = "cpu")]
-    device: Device,
+    device: DeviceArg,
 
     /// Safetensors weights file (from HuggingFace Zyphra/ZUNA).
-    #[arg(long)]
+    #[arg(long, env = "ZUNA_WEIGHTS")]
     weights: String,
 
     /// config.json from HuggingFace Zyphra/ZUNA.
-    #[arg(long)]
+    #[arg(long, env = "ZUNA_CONFIG")]
     config: String,
 
-    /// Raw EEG recording (.fif).  Exactly one of --fif / --input required.
+    /// Raw EEG recording (.fif).
     #[arg(long)]
-    fif: Option<String>,
-
-    /// Pre-processed safetensors batch (legacy Python path).
-    #[arg(long)]
-    input: Option<String>,
+    fif: String,
 
     /// Output safetensors file.
     #[arg(long)]
@@ -69,7 +81,11 @@ struct Args {
     #[arg(long, default_value_t = 10.0)]
     data_norm: f32,
 
-    /// Number of CPU threads for NdArray backend (0 or omit = all cores).
+    /// Seed for the rectified-flow initial noise. Same seed → same output.
+    #[arg(long, default_value_t = 0)]
+    seed: u64,
+
+    /// Number of CPU threads for the CPU backend (0 or omit = all cores).
     #[arg(long, env = "RAYON_NUM_THREADS")]
     threads: Option<usize>,
 
@@ -78,185 +94,130 @@ struct Args {
     verbose: bool,
 }
 
-// ── Per-backend shims ─────────────────────────────────────────────────────────
-
-#[cfg(feature = "ndarray")]
-fn run_cpu(args: Args) -> anyhow::Result<()> {
-    use burn::backend::{ndarray::NdArrayDevice, NdArray};
-    let name = if cfg!(feature = "blas-accelerate") { "CPU (NdArray + Apple Accelerate)" }
-               else if cfg!(feature = "openblas-system") { "CPU (NdArray + OpenBLAS)" }
-               else { "CPU (NdArray + Rayon)" };
-    run::<NdArray>(NdArrayDevice::Cpu, name, args)
-}
-#[cfg(not(feature = "ndarray"))]
-fn run_cpu(_: Args) -> anyhow::Result<()> {
-    anyhow::bail!("CPU backend not compiled — rebuild with `--features ndarray`")
-}
-
-#[cfg(any(feature = "wgpu", feature = "wgpu-f16"))]
-fn run_gpu(args: Args) -> anyhow::Result<()> {
-    use burn::backend::{wgpu::WgpuDevice, Wgpu};
-    run::<Wgpu>(WgpuDevice::DefaultDevice, "GPU (wgpu f32)", args)
-}
-#[cfg(not(any(feature = "wgpu", feature = "wgpu-f16")))]
-fn run_gpu(_: Args) -> anyhow::Result<()> {
-    anyhow::bail!("GPU backend not compiled — rebuild with `--features wgpu`")
-}
-
-#[cfg(any(feature = "wgpu-f16", feature = "wgpu"))]
-fn run_gpu_f16(args: Args) -> anyhow::Result<()> {
-    type B = burn::backend::wgpu::Wgpu<half::f16, i32, u32>;
-    run::<B>(burn::backend::wgpu::WgpuDevice::DefaultDevice, "GPU (wgpu f16)", args)
-}
-#[cfg(not(any(feature = "wgpu-f16", feature = "wgpu")))]
-fn run_gpu_f16(_: Args) -> anyhow::Result<()> {
-    anyhow::bail!("GPU f16 backend not compiled — rebuild with `--features wgpu-f16`")
-}
-
-#[cfg(any(feature = "mlx", feature = "mlx-f16"))]
-fn run_mlx(args: Args) -> anyhow::Result<()> {
-    use burn_mlx::{Mlx, MlxDevice};
-    run::<Mlx>(MlxDevice::Gpu, "MLX (Apple Silicon f32)", args)
-}
-#[cfg(not(any(feature = "mlx", feature = "mlx-f16")))]
-fn run_mlx(_: Args) -> anyhow::Result<()> {
-    anyhow::bail!("MLX backend not compiled — rebuild with `--features mlx`")
-}
-
-#[cfg(any(feature = "mlx-f16", feature = "mlx"))]
-fn run_mlx_f16(args: Args) -> anyhow::Result<()> {
-    use burn_mlx::{MlxHalf, MlxDevice};
-    run::<MlxHalf>(MlxDevice::Gpu, "MLX (Apple Silicon f16)", args)
-}
-#[cfg(not(any(feature = "mlx-f16", feature = "mlx")))]
-fn run_mlx_f16(_: Args) -> anyhow::Result<()> {
-    anyhow::bail!("MLX f16 backend not compiled — rebuild with `--features mlx-f16`")
-}
-
-// ── Main ──────────────────────────────────────────────────────────────────────
 fn main() -> anyhow::Result<()> {
-    let args  = Args::parse();
-    let _n_threads = zuna_rs::init_threads(args.threads);
-    match args.device {
-        Device::Cpu    => run_cpu(args),
-        Device::Gpu    => run_gpu(args),
-        Device::GpuF16 => run_gpu_f16(args),
-        Device::Mlx    => run_mlx(args),
-        Device::MlxF16 => run_mlx_f16(args),
-    }
-}
-
-// ── Generic inference (backend-agnostic) ─────────────────────────────────────
-
-fn run<B: Backend>(dev: B::Device, backend_name: &str, args: Args) -> anyhow::Result<()> {
-    let n_threads = rayon::current_num_threads();
+    let args = Args::parse();
+    let n_threads = zuna_rs::init_threads(args.threads);
+    let device = args.device.into_rlx();
     let t0 = Instant::now();
 
-    println!("Backend : {backend_name}  ({n_threads} threads)");
+    eprintln!("Device   : {:?}  ({n_threads} threads)", device);
 
-    // ── Load model ────────────────────────────────────────────────────────────
-    let (zuna, ms_weights) = ZunaInference::<B>::load(
+    // ── Load model ─────────────────────────────────────────────────────────
+    let (mut zuna, ms_load) = ZunaInference::load(
         Path::new(&args.config),
         Path::new(&args.weights),
-        dev.clone(),
+        device,
     )?;
+    let cfg = zuna.model_cfg();
+    eprintln!(
+        "Model    : ZUNA dim={} layers={} head_dim={} t_dim={}  ({ms_load:.0} ms)",
+        cfg.dim, cfg.n_layers, cfg.head_dim, cfg.t_dim,
+    );
+
+    // ── Preprocess ─────────────────────────────────────────────────────────
+    let t_pp = Instant::now();
+    let pre = preprocess_fif_cpu(Path::new(&args.fif), &DataConfig::default(), args.data_norm)?;
+    let ms_preproc = t_pp.elapsed().as_secs_f64() * 1000.0;
+    eprintln!(
+        "Input    : {}  →  {} epochs ({} channels, {} tokens/epoch)",
+        args.fif,
+        pre.epochs.len(),
+        pre.info.ch_names.len(),
+        pre.epochs.first().map(|e| e.s).unwrap_or(0),
+    );
+    eprintln!("Preproc  : {ms_preproc:.1} ms");
 
     if args.verbose {
-        println!("── Model ─────────────────────────────────────────────────────────");
-        println!("  {}", zuna.describe());
-        println!("  input_dim  : {}", zuna.model_cfg.input_dim);
-        println!("  rope_theta : {}", zuna.model_cfg.rope_theta);
-        println!("  Loaded in {ms_weights:.0} ms");
-    } else {
-        println!("Model   : {}  ({ms_weights:.0} ms)", zuna.describe());
+        eprintln!("── Electrode positions (MNI head frame, mm) ──────");
+        eprintln!("  {:<4} {:<8} {:>10} {:>10} {:>10}", "#", "Name", "Right(x)", "Ant(y)", "Sup(z)");
+        for (i, (name, pos)) in pre.info.ch_names.iter().zip(&pre.info.ch_pos_mm).enumerate() {
+            eprintln!("  {:<4} {:<8} {:>10.2} {:>10.2} {:>10.2}", i, name, pos[0], pos[1], pos[2]);
+        }
     }
 
-    // ── Run pipeline ──────────────────────────────────────────────────────────
-    let result = match (&args.fif, &args.input) {
-        (Some(fif_path), None) => {
-            println!("Input   : {fif_path}");
-            let r = zuna.run_fif(
-                Path::new(fif_path),
-                args.steps,
-                args.cfg,
-                args.data_norm,
-            )?;
+    // ── Run pipeline ───────────────────────────────────────────────────────
+    let t_inf = Instant::now();
+    let mut outputs = Vec::with_capacity(pre.epochs.len());
+    for (i, ep) in pre.epochs.iter().enumerate() {
+        let seed = args.seed.wrapping_add(i as u64).max(1);
+        let out = zuna.run_epoch(ep, args.steps, args.cfg, args.data_norm, seed)?;
+        outputs.push(out);
+    }
+    let ms_infer = t_inf.elapsed().as_secs_f64() * 1000.0;
+    let n = outputs.len();
+    eprintln!(
+        "Infer    : {ms_infer:.0} ms  ({n} × {} steps; {:.0} ms/epoch)",
+        args.steps,
+        if n > 0 { ms_infer / n as f64 } else { 0.0 },
+    );
 
-            if args.verbose {
-                let info = r.fif_info.as_ref().unwrap();
-
-                println!("── FIF ───────────────────────────────────────────────────────────");
-                println!("  Channels  : {}", info.ch_names.len());
-                println!("  Sfreq     : {:.1} Hz  →  {:.1} Hz", info.sfreq, info.target_sfreq);
-                println!("  Duration  : {:.3} s  ({} raw samples)", info.duration_s, info.n_times_raw);
-                println!("  Epochs    : {} × {:.1} s  ({} samples each)",
-                    info.n_epochs, info.epoch_dur_s,
-                    (info.epoch_dur_s * info.target_sfreq) as usize);
-                println!("  Preproc   : {:.1} ms", r.ms_preproc);
-
-                println!("── Electrode positions (MNI head frame, mm) ──────────────────────");
-                println!("  {:<4} {:<8} {:>10} {:>10} {:>10}", "#", "Name", "Right(x)", "Ant(y)", "Sup(z)");
-                println!("  {}", "─".repeat(46));
-                for (i, (name, pos)) in info.ch_names.iter().zip(info.ch_pos_mm.iter()).enumerate() {
-                    println!("  {:<4} {:<8} {:>10.2} {:>10.2} {:>10.2}",
-                        i, name, pos[0], pos[1], pos[2]);
-                }
-            } else {
-                let info = r.fif_info.as_ref().unwrap();
-                println!("  Preproc   : {:.1} ms  ({} epochs)", r.ms_preproc, info.n_epochs);
-            }
-            r
-        }
-        (None, Some(input_path)) => {
-            println!("Input   : {input_path}  (safetensors batch)");
-            zuna.run_safetensors_batch(
-                Path::new(input_path),
-                args.steps,
-                args.cfg,
-                args.data_norm,
-            )?
-        }
-        (Some(_), Some(_)) => anyhow::bail!("supply exactly one of --fif or --input"),
-        (None, None)        => anyhow::bail!("--fif or --input is required"),
-    };
-
-    // ── Per-epoch output ──────────────────────────────────────────────────────
-    let n = result.epochs.len();
-    println!("Epochs  : {n}  ({} steps  cfg={:.2})", args.steps, args.cfg);
-
-    for (i, ep) in result.epochs.iter().enumerate() {
-        if args.verbose {
+    if args.verbose {
+        for (i, ep) in outputs.iter().enumerate() {
             let data = &ep.reconstructed;
             let mean: f64 = data.iter().map(|&v| v as f64).sum::<f64>() / data.len() as f64;
-            let std:  f64 = (data.iter().map(|&v| {
-                let d = v as f64 - mean; d*d
-            }).sum::<f64>() / data.len() as f64).sqrt();
+            let var:  f64 = data.iter().map(|&v| {
+                let d = v as f64 - mean;
+                d * d
+            }).sum::<f64>() / data.len() as f64;
+            let std = var.sqrt();
             let min = data.iter().cloned().fold(f32::INFINITY, f32::min);
             let max = data.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-            println!("  [ep {}/{}] {:?}  mean={mean:.4}  std={std:.4}  \
-                      min={min:.4}  max={max:.4}",
-                i+1, n, ep.shape);
-        } else {
-            println!("  [ep {}/{n}] {:?}  {:.0} ms", i+1, ep.shape, result.ms_infer / n as f64);
+            eprintln!(
+                "  [ep {}/{n}] {:?}  mean={mean:.4}  std={std:.4}  min={min:.4}  max={max:.4}",
+                i + 1, ep.shape,
+            );
         }
     }
 
-    // ── Timing ───────────────────────────────────────────────────────────────
-    let ms_total = t0.elapsed().as_secs_f64() * 1000.0;
-    println!("── Timing ───────────────────────────────────────────────────────");
-    println!("  Weights  : {ms_weights:.0} ms");
-    println!("  Preproc  : {:.1} ms", result.ms_preproc);
-    println!("  Infer    : {:.0} ms  ({n} × {} steps)", result.ms_infer, args.steps);
-    println!("  Total    : {ms_total:.0} ms");
-    // Machine-readable timing for shell capture
-    eprintln!("TIMING weights={ms_weights:.1}ms preproc={:.1}ms inference={:.1}ms total={ms_total:.1}ms",
-              result.ms_preproc, result.ms_infer);
+    // ── Save ───────────────────────────────────────────────────────────────
+    save_safetensors(&outputs, &args.output)?;
+    eprintln!("Output   → {}  ({:.0} ms total)", args.output, t0.elapsed().as_secs_f64() * 1000.0);
 
-    // ── Save ──────────────────────────────────────────────────────────────────
-    result.save_safetensors(&args.output)?;
-    println!("Output  → {}", args.output);
-
+    eprintln!(
+        "TIMING weights={ms_load:.1}ms preproc={ms_preproc:.1}ms inference={ms_infer:.1}ms total={:.1}ms",
+        t0.elapsed().as_secs_f64() * 1000.0,
+    );
     Ok(())
 }
 
-// Unused `device()` helper removed — device is now constructed per-backend in run_* shims.
+/// Write reconstructed epochs to a safetensors file.
+///
+/// Keys per epoch `N`:
+/// * `reconstructed_N` — `[C, T]` float32
+/// * `chan_pos_N`       — `[C, 3]` float32
+/// Plus a scalar `n_samples` float32.
+fn save_safetensors(
+    epochs: &[EpochOutput],
+    path:   &str,
+) -> anyhow::Result<()> {
+    use safetensors::{Dtype, View};
+    use std::borrow::Cow;
+
+    struct F32Tensor { data: Vec<u8>, shape: Vec<usize> }
+    impl View for F32Tensor {
+        fn dtype(&self)    -> Dtype          { Dtype::F32 }
+        fn shape(&self)    -> &[usize]        { &self.shape }
+        fn data(&self)     -> Cow<'_, [u8]>   { Cow::Borrowed(&self.data) }
+        fn data_len(&self) -> usize            { self.data.len() }
+    }
+    fn to_bytes(v: &[f32]) -> Vec<u8> {
+        v.iter().flat_map(|f| f.to_le_bytes()).collect()
+    }
+
+    let mut keys:    Vec<String>    = Vec::new();
+    let mut tensors: Vec<F32Tensor> = Vec::new();
+    for (i, ep) in epochs.iter().enumerate() {
+        keys.push(format!("reconstructed_{i}"));
+        tensors.push(F32Tensor { data: to_bytes(&ep.reconstructed), shape: ep.shape.clone() });
+        keys.push(format!("chan_pos_{i}"));
+        tensors.push(F32Tensor { data: to_bytes(&ep.chan_pos), shape: vec![ep.n_channels, 3] });
+    }
+    keys.push("n_samples".into());
+    tensors.push(F32Tensor { data: to_bytes(&[epochs.len() as f32]), shape: vec![1] });
+
+    let pairs: Vec<(&str, F32Tensor)> =
+        keys.iter().map(|s| s.as_str()).zip(tensors).collect();
+    let bytes = safetensors::serialize(pairs, None)?;
+    std::fs::write(path, bytes)?;
+    Ok(())
+}

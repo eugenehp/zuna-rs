@@ -23,11 +23,11 @@
 //!
 //! ```text
 //! cargo test --release --no-default-features \
-//!     --features ndarray,rlx-backend,rlx-cpu \
+//!     --features burn,rlx,ndarray,rlx-cpu \
 //!     --test parity_rlx_vs_burn -- --nocapture
 //! ```
 
-#![cfg(feature = "rlx-backend")]
+#![cfg(all(feature = "burn", feature = "rlx"))]
 
 use std::path::{Path, PathBuf};
 
