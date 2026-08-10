@@ -1,8 +1,17 @@
 //! # zuna-rs — ZUNA EEG Foundation Model inference in Rust
 //!
 //! Pure-Rust inference for the [ZUNA](https://huggingface.co/Zyphra/ZUNA)
-//! EEG foundation model. Two inference engines are available behind Cargo
-//! features:
+//! EEG foundation model.
+//!
+//! ## Checkpoints
+//!
+//! Both [`Zyphra/ZUNA`](https://huggingface.co/Zyphra/ZUNA) and
+//! [`Zyphra/ZUNA1.1`](https://huggingface.co/Zyphra/ZUNA1.1) load through the
+//! same API. ZUNA1.1 adds QK-norm and sandwich norms, neither of which appears
+//! in `config.json`; [`ModelArch`] detects them from the tensor names, so no
+//! flag has to be passed at load time.
+//!
+//! Two inference engines are available behind Cargo features:
 //!
 //! | feature | module | runtime |
 //! |---------|--------|---------|
@@ -73,7 +82,7 @@ pub mod rlx;
 pub use inference::{InferenceResult, ZunaInference};
 
 #[cfg(feature = "burn")]
-pub use encoder::{EpochEmbedding, EncodingResult, ZunaEncoder};
+pub use encoder::{EncodingResult, EpochEmbedding, ZunaEncoder};
 
 #[cfg(feature = "burn")]
 pub use decoder::ZunaDecoder;
@@ -86,22 +95,20 @@ pub use rlx::{
 
 // ── Shared types ───────────────────────────────────────────────────────────
 
-pub use config::{DataConfig, InferConfig, ModelConfig};
+pub use config::{canonical_key, DataConfig, InferConfig, ModelArch, ModelConfig};
 
-pub use data::{
-    FifInfo, PreprocessedEpoch, PreprocessedFif, invert_reshape, preprocess_fif_cpu,
-};
+pub use data::{invert_reshape, preprocess_fif_cpu, FifInfo, PreprocessedEpoch, PreprocessedFif};
 
 #[cfg(feature = "burn")]
-pub use data::{InputBatch, preprocessed_to_batch};
+pub use data::{preprocessed_to_batch, InputBatch};
 
 pub use channel_positions::{
-    MontageLayout, channel_xyz, montage_channels, nearest_channel, normalise,
+    channel_xyz, montage_channels, nearest_channel, normalise, MontageLayout,
 };
 
 pub use csv_loader::{
-    CsvInfo, CsvLoadOptions, PaddingStrategy, load_from_csv, load_from_named_tensor,
-    load_from_raw_tensor,
+    load_from_csv, load_from_named_tensor, load_from_raw_tensor, CsvInfo, CsvLoadOptions,
+    PaddingStrategy,
 };
 
 pub use csv_export::fif_to_csv;

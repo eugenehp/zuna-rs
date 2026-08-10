@@ -55,11 +55,12 @@ use crate::data::PreprocessedEpoch;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// How to synthesise EEG channels that are missing from the CSV.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum PaddingStrategy {
     /// Fill the missing channel with zeros.
     /// Its scalp position is taken from `position_overrides`, then the
     /// channel-position database, then the centroid of existing channels.
+    #[default]
     Zero,
 
     /// Clone the data from a specific named channel.
@@ -102,10 +103,6 @@ pub enum PaddingStrategy {
     NoPadding,
 }
 
-impl Default for PaddingStrategy {
-    fn default() -> Self { Self::Zero }
-}
-
 /// Options for [`load_from_csv`].
 #[derive(Debug, Clone)]
 pub struct CsvLoadOptions {
@@ -144,11 +141,11 @@ impl Default for CsvLoadOptions {
     fn default() -> Self {
         Self {
             sample_rate: 256.0,
-            data_norm:   10.0,
-            target_channels:    None,
-            padding:            PaddingStrategy::Zero,
+            data_norm: 10.0,
+            target_channels: None,
+            padding: PaddingStrategy::Zero,
             position_overrides: HashMap::new(),
-            channel_whitelist:  None,
+            channel_whitelist: None,
         }
     }
 }
@@ -182,13 +179,13 @@ pub struct CsvInfo {
 /// resample (if needed) → 0.5 Hz highpass FIR → average reference →
 /// global z-score → epoch (5 s) → baseline correction → ÷ data_norm.
 pub fn load_from_csv(
-    path:     &Path,
-    opts:     &CsvLoadOptions,
+    path: &Path,
+    opts: &CsvLoadOptions,
     data_cfg: &DataConfig,
 ) -> anyhow::Result<(Vec<PreprocessedEpoch>, CsvInfo)> {
     // ── Parse CSV ─────────────────────────────────────────────────────────────
-    let (csv_names, raw_data) = parse_csv(path)
-        .with_context(|| format!("parsing CSV {}", path.display()))?;
+    let (csv_names, raw_data) =
+        parse_csv(path).with_context(|| format!("parsing CSV {}", path.display()))?;
     let (_n_ch_raw, n_t) = raw_data.dim();
 
     // ── Look up positions for loaded channels ─────────────────────────────────
@@ -236,14 +233,18 @@ pub fn load_from_csv(
     // ── Run exg preprocessing pipeline ───────────────────────────────────────
     let pos_arr = positions_to_array(&padded_positions, n_ch_final);
     let batches = run_pipeline(
-        padded_data, pos_arr, opts.sample_rate, opts.data_norm, data_cfg,
+        padded_data,
+        pos_arr,
+        opts.sample_rate,
+        opts.data_norm,
+        data_cfg,
     )?;
     let n_epochs = batches.len();
 
     let info = CsvInfo {
-        ch_names:      padded_names,
-        ch_pos_m:      padded_positions,
-        sample_rate:   opts.sample_rate,
+        ch_names: padded_names,
+        ch_pos_m: padded_positions,
+        sample_rate: opts.sample_rate,
         n_samples_raw: n_t,
         duration_s,
         n_epochs,
@@ -263,16 +264,18 @@ pub fn load_from_csv(
 /// The data must be raw (unprocessed) EEG in volts; the full exg pipeline is
 /// applied internally.  The shape is `[n_channels, n_samples]`.
 pub fn load_from_raw_tensor(
-    data:      Array2<f32>,
+    data: Array2<f32>,
     positions: &[[f32; 3]],
     sample_rate: f32,
-    data_norm:   f32,
-    data_cfg:    &DataConfig,
+    data_norm: f32,
+    data_cfg: &DataConfig,
 ) -> anyhow::Result<Vec<PreprocessedEpoch>> {
     let n_ch = data.nrows();
     anyhow::ensure!(
         positions.len() == n_ch,
-        "positions.len() = {} must equal data.nrows() = {}", positions.len(), n_ch
+        "positions.len() = {} must equal data.nrows() = {}",
+        positions.len(),
+        n_ch
     );
 
     let duration_s = data.ncols() as f32 / sample_rate;
@@ -295,18 +298,19 @@ pub fn load_from_raw_tensor(
 /// the remaining channels as their position, which keeps them encodable.
 /// Pass explicit XYZ via `position_overrides` to override any channel.
 pub fn load_from_named_tensor(
-    data:               Array2<f32>,
-    channel_names:      &[&str],
-    sample_rate:        f32,
-    data_norm:          f32,
+    data: Array2<f32>,
+    channel_names: &[&str],
+    sample_rate: f32,
+    data_norm: f32,
     position_overrides: &HashMap<String, [f32; 3]>,
-    data_cfg:           &DataConfig,
+    data_cfg: &DataConfig,
 ) -> anyhow::Result<Vec<PreprocessedEpoch>> {
     let n_ch = data.nrows();
     anyhow::ensure!(
         channel_names.len() == n_ch,
         "channel_names.len() = {} must equal data.nrows() = {}",
-        channel_names.len(), n_ch
+        channel_names.len(),
+        n_ch
     );
 
     let duration_s = data.ncols() as f32 / sample_rate;
@@ -316,7 +320,7 @@ pub fn load_from_named_tensor(
 
     let names: Vec<String> = channel_names.iter().map(|s| s.to_string()).collect();
     let positions = resolve_positions(&names, position_overrides);
-    let pos_arr   = positions_to_array(&positions, n_ch);
+    let pos_arr = positions_to_array(&positions, n_ch);
 
     run_pipeline(data, pos_arr, sample_rate, data_norm, data_cfg)
 }
@@ -334,26 +338,37 @@ pub fn load_from_named_tensor(
 ///   containing "time" case-insensitively, or simply by being column index 0).
 /// - All remaining columns are EEG channels.
 fn parse_csv(path: &Path) -> anyhow::Result<(Vec<String>, Array2<f32>)> {
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let content =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
 
-    let mut lines = content.lines()
-        .filter(|l| { let t = l.trim(); !t.is_empty() && !t.starts_with('#') });
+    let mut lines = content.lines().filter(|l| {
+        let t = l.trim();
+        !t.is_empty() && !t.starts_with('#')
+    });
 
     // ── Header ────────────────────────────────────────────────────────────────
-    let header_line = lines.next()
+    let header_line = lines
+        .next()
         .ok_or_else(|| anyhow::anyhow!("CSV file is empty"))?;
     let header: Vec<&str> = header_line.split(',').collect();
-    anyhow::ensure!(header.len() >= 2, "CSV must have at least a timestamp and one channel column");
+    anyhow::ensure!(
+        header.len() >= 2,
+        "CSV must have at least a timestamp and one channel column"
+    );
 
     // Identify timestamp column (first column, OR first whose name ≈ "time")
-    let ts_col = header.iter().position(|h| {
-        let n = h.trim().to_ascii_lowercase();
-        n.contains("time") || n == "t" || n == "ts"
-    }).unwrap_or(0);
+    let ts_col = header
+        .iter()
+        .position(|h| {
+            let n = h.trim().to_ascii_lowercase();
+            n.contains("time") || n == "t" || n == "ts"
+        })
+        .unwrap_or(0);
 
     // Channel names: all columns except the timestamp column
-    let ch_names: Vec<String> = header.iter().enumerate()
+    let ch_names: Vec<String> = header
+        .iter()
+        .enumerate()
         .filter(|&(i, _)| i != ts_col)
         .map(|(_, h)| h.trim().to_string())
         .collect();
@@ -366,12 +381,17 @@ fn parse_csv(path: &Path) -> anyhow::Result<(Vec<String>, Array2<f32>)> {
         let parts: Vec<&str> = line.split(',').collect();
         anyhow::ensure!(
             parts.len() == header.len(),
-            "row {row_idx}: expected {} columns, got {}", header.len(), parts.len()
+            "row {row_idx}: expected {} columns, got {}",
+            header.len(),
+            parts.len()
         );
-        let eeg: Vec<f32> = parts.iter().enumerate()
+        let eeg: Vec<f32> = parts
+            .iter()
+            .enumerate()
             .filter(|&(i, _)| i != ts_col)
             .map(|(_, s)| {
-                s.trim().parse::<f32>()
+                s.trim()
+                    .parse::<f32>()
                     .with_context(|| format!("row {row_idx}: cannot parse '{}'", s.trim()))
             })
             .collect::<anyhow::Result<Vec<f32>>>()?;
@@ -389,8 +409,7 @@ fn parse_csv(path: &Path) -> anyhow::Result<(Vec<String>, Array2<f32>)> {
             flat[c * n_t + t] = v;
         }
     }
-    let data = Array2::from_shape_vec((n_ch, n_t), flat)
-        .context("assembling data array")?;
+    let data = Array2::from_shape_vec((n_ch, n_t), flat).context("assembling data array")?;
 
     Ok((ch_names, data))
 }
@@ -406,28 +425,34 @@ fn parse_csv(path: &Path) -> anyhow::Result<(Vec<String>, Array2<f32>)> {
 /// 2. [`channel_xyz`] database
 /// 3. `[0.0, 0.0, 0.0]` placeholder — will be replaced by centroid after all
 ///    known channels are resolved.
-fn resolve_positions(
-    names:     &[String],
-    overrides: &HashMap<String, [f32; 3]>,
-) -> Vec<[f32; 3]> {
-    let mut positions: Vec<[f32; 3]> = names.iter().map(|name| {
-        // 1. override map
-        let key = normalise(name);
-        if let Some(&xyz) = overrides.iter().find(|(k, _)| normalise(k) == key).map(|(_, v)| v) {
-            return xyz;
-        }
-        // 2. database
-        if let Some(xyz) = channel_xyz(name) {
-            return xyz;
-        }
-        // 3. placeholder
-        [f32::NAN, f32::NAN, f32::NAN]
-    }).collect();
+fn resolve_positions(names: &[String], overrides: &HashMap<String, [f32; 3]>) -> Vec<[f32; 3]> {
+    let mut positions: Vec<[f32; 3]> = names
+        .iter()
+        .map(|name| {
+            // 1. override map
+            let key = normalise(name);
+            if let Some(&xyz) = overrides
+                .iter()
+                .find(|(k, _)| normalise(k) == key)
+                .map(|(_, v)| v)
+            {
+                return xyz;
+            }
+            // 2. database
+            if let Some(xyz) = channel_xyz(name) {
+                return xyz;
+            }
+            // 3. placeholder
+            [f32::NAN, f32::NAN, f32::NAN]
+        })
+        .collect();
 
     // Replace NaN placeholders with centroid of known positions
     let centroid = centroid_of(&positions);
     for p in &mut positions {
-        if p[0].is_nan() { *p = centroid; }
+        if p[0].is_nan() {
+            *p = centroid;
+        }
     }
 
     positions
@@ -445,7 +470,9 @@ fn dist3(a: [f32; 3], b: [f32; 3]) -> f32 {
 /// Compute centroid of non-NaN positions; returns `[0,0,0]` if none.
 fn centroid_of(positions: &[[f32; 3]]) -> [f32; 3] {
     let valid: Vec<_> = positions.iter().filter(|p| !p[0].is_nan()).collect();
-    if valid.is_empty() { return [0.0, 0.0, 0.0]; }
+    if valid.is_empty() {
+        return [0.0, 0.0, 0.0];
+    }
     let n = valid.len() as f32;
     let x = valid.iter().map(|p| p[0]).sum::<f32>() / n;
     let y = valid.iter().map(|p| p[1]).sum::<f32>() / n;
@@ -468,36 +495,40 @@ fn positions_to_array(positions: &[[f32; 3]], n_ch: usize) -> Array2<f32> {
 /// in the whitelist are considered "present"; others are ignored.
 ///
 /// Returns `(padded_data [C_out, T], padded_names, padded_positions, n_padded)`.
+/// `(data, channel_names, positions, n_padded)` — the result of [`apply_padding`].
+type PaddedChannels = (Array2<f32>, Vec<String>, Vec<[f32; 3]>, usize);
+
 fn apply_padding(
-    data:      &Array2<f32>,
-    names:     &[String],
+    data: &Array2<f32>,
+    names: &[String],
     positions: &[[f32; 3]],
-    targets:   &[String],
-    strategy:  &PaddingStrategy,
+    targets: &[String],
+    strategy: &PaddingStrategy,
     overrides: &HashMap<String, [f32; 3]>,
     whitelist: Option<&[String]>,
-) -> anyhow::Result<(Array2<f32>, Vec<String>, Vec<[f32; 3]>, usize)> {
+) -> anyhow::Result<PaddedChannels> {
     let n_t = data.ncols();
-    let mut out_rows:  Vec<Vec<f32>>   = Vec::with_capacity(targets.len());
-    let mut out_names: Vec<String>     = Vec::with_capacity(targets.len());
-    let mut out_pos:   Vec<[f32; 3]>   = Vec::with_capacity(targets.len());
+    let mut out_rows: Vec<Vec<f32>> = Vec::with_capacity(targets.len());
+    let mut out_names: Vec<String> = Vec::with_capacity(targets.len());
+    let mut out_pos: Vec<[f32; 3]> = Vec::with_capacity(targets.len());
     let mut n_padded = 0usize;
 
     // Build a normalised-name → source-index map for loaded channels.
     // If a whitelist is provided, only whitelisted channels count as "present".
-    let wl_keys: Option<std::collections::HashSet<String>> = whitelist.map(|wl| {
-        wl.iter().map(|n| normalise(n)).collect()
-    });
-    let src_index: HashMap<String, usize> = names.iter().enumerate()
-        .filter(|(_, n)| {
-            wl_keys.as_ref().map_or(true, |wl| wl.contains(&normalise(n)))
-        })
+    let wl_keys: Option<std::collections::HashSet<String>> =
+        whitelist.map(|wl| wl.iter().map(|n| normalise(n)).collect());
+    let src_index: HashMap<String, usize> = names
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| wl_keys.as_ref().is_none_or(|wl| wl.contains(&normalise(n))))
         .map(|(i, n)| (normalise(n), i))
         .collect();
 
     // Positions of loaded channels, useful for CloneNearest.
     // Restricted to whitelisted channels when whitelist is active.
-    let loaded_xyz_with_idx: Vec<([f32; 3], usize)> = positions.iter().copied()
+    let loaded_xyz_with_idx: Vec<([f32; 3], usize)> = positions
+        .iter()
+        .copied()
         .enumerate()
         .filter(|(i, _)| src_index.values().any(|&si| si == *i))
         .map(|(i, xyz)| (xyz, i))
@@ -527,30 +558,31 @@ fn apply_padding(
                 }
                 PaddingStrategy::CloneChannel(src_name) => {
                     let src_key = normalise(src_name);
-                    let src_idx = src_index.get(&src_key).copied()
-                        .ok_or_else(|| anyhow::anyhow!(
-                            "CloneChannel source '{}' not found in CSV", src_name
-                        ))?;
+                    let src_idx = src_index.get(&src_key).copied().ok_or_else(|| {
+                        anyhow::anyhow!("CloneChannel source '{}' not found in CSV", src_name)
+                    })?;
                     data.row(src_idx).to_vec()
                 }
                 PaddingStrategy::CloneNearest => {
                     // Find loaded channel whose position is closest to `new_pos`
-                    let nearest_idx = nearest_channel(new_pos, &loaded_xyz_with_idx)
-                        .unwrap_or(0);
+                    let nearest_idx = nearest_channel(new_pos, &loaded_xyz_with_idx).unwrap_or(0);
                     data.row(nearest_idx).to_vec()
                 }
 
                 PaddingStrategy::InterpWeighted { k } => {
                     // Sort real channels by L2 distance, keep k nearest, then
                     // form an inverse-distance–weighted average.
-                    let mut dists: Vec<(f32, usize)> = loaded_xyz_with_idx.iter()
+                    let mut dists: Vec<(f32, usize)> = loaded_xyz_with_idx
+                        .iter()
                         .map(|&(xyz, idx)| (dist3(xyz, new_pos), idx))
                         .collect();
-                    dists.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                    dists
+                        .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
                     let k_actual = (*k).min(dists.len()).max(1);
-                    let k_slice  = &dists[..k_actual];
+                    let k_slice = &dists[..k_actual];
                     // weight_i = 1/d_i  (replace exact-zero distance with large weight)
-                    let weights: Vec<f32> = k_slice.iter()
+                    let weights: Vec<f32> = k_slice
+                        .iter()
                         .map(|(d, _)| if *d < 1e-6 { 1e6_f32 } else { 1.0 / d })
                         .collect();
                     let w_sum: f32 = weights.iter().sum();
@@ -569,7 +601,9 @@ fn apply_padding(
                     // then find the nearest real channel to that mirror position.
                     let mirror_pos = [-new_pos[0], new_pos[1], new_pos[2]];
                     let nearest_idx = nearest_channel(mirror_pos, &loaded_xyz_with_idx)
-                        .unwrap_or_else(|| loaded_xyz_with_idx.first().map(|&(_, i)| i).unwrap_or(0));
+                        .unwrap_or_else(|| {
+                            loaded_xyz_with_idx.first().map(|&(_, i)| i).unwrap_or(0)
+                        });
                     data.row(nearest_idx).to_vec()
                 }
 
@@ -582,7 +616,9 @@ fn apply_padding(
                             *m += v;
                         }
                     }
-                    for m in &mut mean_sig { *m /= n_real as f32; }
+                    for m in &mut mean_sig {
+                        *m /= n_real as f32;
+                    }
                     mean_sig
                 }
 
@@ -598,8 +634,8 @@ fn apply_padding(
 
     let n_out = out_rows.len();
     let flat: Vec<f32> = out_rows.into_iter().flatten().collect();
-    let padded = Array2::from_shape_vec((n_out, n_t), flat)
-        .context("assembling padded data array")?;
+    let padded =
+        Array2::from_shape_vec((n_out, n_t), flat).context("assembling padded data array")?;
 
     Ok((padded, out_names, out_pos, n_padded))
 }
@@ -608,12 +644,16 @@ fn apply_padding(
 ///
 /// Priority: position_overrides → database lookup → centroid of existing.
 fn position_for_missing(
-    name:      &str,
+    name: &str,
     overrides: &HashMap<String, [f32; 3]>,
-    existing:  &[[f32; 3]],
+    existing: &[[f32; 3]],
 ) -> [f32; 3] {
     let key = normalise(name);
-    if let Some(&xyz) = overrides.iter().find(|(k, _)| normalise(k) == key).map(|(_, v)| v) {
+    if let Some(&xyz) = overrides
+        .iter()
+        .find(|(k, _)| normalise(k) == key)
+        .map(|(_, v)| v)
+    {
         return xyz;
     }
     if let Some(xyz) = channel_xyz(name) {
@@ -632,15 +672,18 @@ fn position_for_missing(
 /// resample → 0.5 Hz HP FIR → average reference → global z-score →
 /// epoch (5 s) → baseline correction → ÷ data_norm
 fn run_pipeline(
-    data:        Array2<f32>,    // [C, T] raw EEG in volts
-    pos_arr:     Array2<f32>,    // [C, 3] metres
+    data: Array2<f32>,    // [C, T] raw EEG in volts
+    pos_arr: Array2<f32>, // [C, 3] metres
     sample_rate: f32,
-    data_norm:   f32,
-    data_cfg:    &DataConfig,
+    data_norm: f32,
+    data_cfg: &DataConfig,
 ) -> anyhow::Result<Vec<PreprocessedEpoch>> {
     use exg::PipelineConfig;
 
-    let cfg = PipelineConfig { data_norm, ..PipelineConfig::default() };
+    let cfg = PipelineConfig {
+        data_norm,
+        ..PipelineConfig::default()
+    };
     let epochs = exg::preprocess(data, pos_arr, sample_rate, &cfg)?;
 
     if epochs.is_empty() {
@@ -655,13 +698,17 @@ fn run_pipeline(
         let tc = t / tf;
 
         // Discretise channel positions into bin indices.
-        let disc: Vec<i32> = pos_arr.iter().enumerate().map(|(i, &v)| {
-            let axis = i % 3;
-            let lo = data_cfg.xyz_min[axis];
-            let hi = data_cfg.xyz_max[axis];
-            let norm = (v - lo) / (hi - lo);
-            (norm * bins).min(bins - 1.0).max(0.0) as i32
-        }).collect();
+        let disc: Vec<i32> = pos_arr
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| {
+                let axis = i % 3;
+                let lo = data_cfg.xyz_min[axis];
+                let hi = data_cfg.xyz_max[axis];
+                let norm = (v - lo) / (hi - lo);
+                (norm * bins).min(bins - 1.0).max(0.0) as i32
+            })
+            .collect();
 
         // Chop + reshape `[C, T]` → `[C×tc, tf]`; build matching tok_idx.
         let s = c * tc;
@@ -673,7 +720,7 @@ fn run_pipeline(
                 for f in 0..tf {
                     eeg_tokens[token * tf + f] = eeg_arr[[ch, ti * tf + f]];
                 }
-                tok_idx[token * 4]     = disc[ch * 3];
+                tok_idx[token * 4] = disc[ch * 3];
                 tok_idx[token * 4 + 1] = disc[ch * 3 + 1];
                 tok_idx[token * 4 + 2] = disc[ch * 3 + 2];
                 tok_idx[token * 4 + 3] = ti as i32;
@@ -681,7 +728,13 @@ fn run_pipeline(
         }
         let chan_pos: Vec<f32> = pos_arr.iter().copied().collect();
         batches.push(PreprocessedEpoch {
-            eeg_tokens, tok_idx, chan_pos, s, tf, n_channels: c, tc,
+            eeg_tokens,
+            tok_idx,
+            chan_pos,
+            s,
+            tf,
+            n_channels: c,
+            tc,
         });
     }
 
@@ -742,7 +795,7 @@ mod tests {
         // Unknown channel should get centroid of known channels, which is Cz
         let cz = channel_xyz("Cz").unwrap();
         let centroid = pos[0]; // unknown channel
-        // centroid of [unknown_placeholder, cz] → when unknown is NaN, centroid = cz
+                               // centroid of [unknown_placeholder, cz] → when unknown is NaN, centroid = cz
         assert!((centroid[0] - cz[0]).abs() < 1e-5);
     }
 
@@ -753,8 +806,15 @@ mod tests {
         let pos = resolve_positions(&names, &HashMap::new());
         let targets = vec!["Fp1".to_string(), "Fp2".to_string(), "Fz".to_string()];
         let (out, out_names, out_pos, n_padded) = apply_padding(
-            &data, &names, &pos, &targets, &PaddingStrategy::Zero, &HashMap::new(), None
-        ).unwrap();
+            &data,
+            &names,
+            &pos,
+            &targets,
+            &PaddingStrategy::Zero,
+            &HashMap::new(),
+            None,
+        )
+        .unwrap();
         assert_eq!(out.dim(), (3, 4));
         assert_eq!(n_padded, 1);
         assert_eq!(out_names[2], "Fz");
@@ -770,11 +830,17 @@ mod tests {
         let data = Array2::from_shape_vec((2, 4), (0..8).map(|i| i as f32).collect()).unwrap();
         let names = vec!["Fp1".to_string(), "Fp2".to_string()];
         let pos = resolve_positions(&names, &HashMap::new());
-        let targets = vec!["Fp1".to_string(), "Cz".to_string()];  // Cz missing
+        let targets = vec!["Fp1".to_string(), "Cz".to_string()]; // Cz missing
         let (out, _, _, n_padded) = apply_padding(
-            &data, &names, &pos, &targets,
-            &PaddingStrategy::CloneChannel("Fp1".to_string()), &HashMap::new(), None
-        ).unwrap();
+            &data,
+            &names,
+            &pos,
+            &targets,
+            &PaddingStrategy::CloneChannel("Fp1".to_string()),
+            &HashMap::new(),
+            None,
+        )
+        .unwrap();
         assert_eq!(n_padded, 1);
         // Cz row should equal Fp1 row
         assert_eq!(out.row(0).to_vec(), out.row(1).to_vec());
@@ -783,14 +849,21 @@ mod tests {
     #[test]
     fn padding_clone_nearest() {
         // Fp1 and Fp2 are close together; Fz is between them and Cz
-        let data = Array2::from_shape_vec((2, 4), (0..8).map(|i| i as f32 * 0.1).collect()).unwrap();
+        let data =
+            Array2::from_shape_vec((2, 4), (0..8).map(|i| i as f32 * 0.1).collect()).unwrap();
         let names = vec!["Fp1".to_string(), "Fp2".to_string()];
         let pos = resolve_positions(&names, &HashMap::new());
         let targets = vec!["Fp1".to_string(), "Fp2".to_string(), "AF7".to_string()];
         let (out, _, _, n_padded) = apply_padding(
-            &data, &names, &pos, &targets,
-            &PaddingStrategy::CloneNearest, &HashMap::new(), None
-        ).unwrap();
+            &data,
+            &names,
+            &pos,
+            &targets,
+            &PaddingStrategy::CloneNearest,
+            &HashMap::new(),
+            None,
+        )
+        .unwrap();
         assert_eq!(n_padded, 1);
         // AF7 is near Fp1/Fp2 front — cloned from one of them, must be nonzero
         assert!(out.row(2).iter().any(|&v| v != 0.0));

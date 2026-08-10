@@ -1,12 +1,12 @@
-/// RMSNorm and AdaRMSNorm (burn 0.20.1)
-///
-/// burn 0.20.1 ships `burn::nn::RmsNorm` natively (field: `gamma`).
-/// We use it directly for the encoder, and implement AdaRMSNorm by hand
-/// for the decoder (conditioned on timestep embedding `c`).
+//! RMSNorm and AdaRMSNorm (burn 0.20.1)
+//!
+//! burn 0.20.1 ships `burn::nn::RmsNorm` natively (field: `gamma`).
+//! We use it directly for the encoder, and implement AdaRMSNorm by hand
+//! for the decoder (conditioned on timestep embedding `c`).
 
-use burn::prelude::*;
-use burn::nn::{Linear, RmsNorm, RmsNormConfig};
 use crate::model::linear_zeros;
+use burn::nn::{Linear, RmsNorm, RmsNormConfig};
+use burn::prelude::*;
 
 // ── Plain RMSNorm wrapper (maps the API used in the rest of our code) ─────────
 

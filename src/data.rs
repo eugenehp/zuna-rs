@@ -1,7 +1,7 @@
 //! Data preparation for ZUNA inference.
 //!
 //! CPU preprocessing ([`preprocess_fif_cpu`]) is always available. Burn
-//! tensor helpers ([`InputBatch`], [`load_from_fif`], …) require
+//! tensor helpers (`InputBatch`, `load_from_fif`, …) require
 //! `--features burn`.
 
 use std::path::Path;
@@ -162,25 +162,32 @@ mod burn_data {
         device: &B::Device,
     ) -> Tensor<B, 2, Int> {
         let [_c, _] = chan_pos.dims();
-        let xyz_min = Tensor::<B, 2>::from_data(
-            TensorData::new(cfg.xyz_min.to_vec(), vec![1, 3]),
-            device,
-        );
-        let xyz_max = Tensor::<B, 2>::from_data(
-            TensorData::new(cfg.xyz_max.to_vec(), vec![1, 3]),
-            device,
-        );
+        let xyz_min =
+            Tensor::<B, 2>::from_data(TensorData::new(cfg.xyz_min.to_vec(), vec![1, 3]), device);
+        let xyz_max =
+            Tensor::<B, 2>::from_data(TensorData::new(cfg.xyz_max.to_vec(), vec![1, 3]), device);
         let norm = (chan_pos - xyz_min.clone()) / (xyz_max - xyz_min);
         let bins = cfg.num_bins as f32;
-        norm.mul_scalar(bins).int().clamp(0i32, cfg.num_bins as i32 - 1)
+        norm.mul_scalar(bins)
+            .int()
+            .clamp(0i32, cfg.num_bins as i32 - 1)
     }
+
+    /// `(eeg_tokens, chan_pos, chan_pos_discrete, t_coarse)` — the result of
+    /// [`chop_and_reshape`].
+    pub type ChoppedTokens<B> = (
+        Tensor<B, 2>,
+        Tensor<B, 2>,
+        Tensor<B, 2, Int>,
+        Tensor<B, 2, Int>,
+    );
 
     pub fn chop_and_reshape<B: Backend>(
         eeg: Tensor<B, 2>,
         chan_pos: Tensor<B, 2>,
         chan_pos_disc: Tensor<B, 2, Int>,
         tf: usize,
-    ) -> (Tensor<B, 2>, Tensor<B, 2>, Tensor<B, 2, Int>, Tensor<B, 2, Int>) {
+    ) -> ChoppedTokens<B> {
         let [c, t_total] = eeg.dims();
         assert_eq!(t_total % tf, 0);
         let tc = t_total / tf;
@@ -190,11 +197,8 @@ mod burn_data {
         let pos = repeat_interleave_rows_f(chan_pos, tc);
         let posd = repeat_interleave_rows_i(chan_pos_disc, tc);
         let tc_vals: Vec<i32> = (0..tc as i32).cycle().take(s).collect();
-        let t_coarse = Tensor::<B, 1, Int>::from_data(
-            TensorData::new(tc_vals, vec![s]),
-            &device,
-        )
-        .reshape([s, 1]);
+        let t_coarse = Tensor::<B, 1, Int>::from_data(TensorData::new(tc_vals, vec![s]), &device)
+            .reshape([s, 1]);
         (eeg_tokens, pos, posd, t_coarse)
     }
 
@@ -224,31 +228,25 @@ mod burn_data {
         let mut i = 0;
         loop {
             let prefix = format!("encoder_input_{i}");
-            let Some(tensor) = st.tensor(&prefix).ok() else { break };
-            let shape: Vec<usize> = tensor.shape().iter().copied().collect();
+            let Some(tensor) = st.tensor(&prefix).ok() else {
+                break;
+            };
+            let shape: Vec<usize> = tensor.shape().to_vec();
             let data = bytes_to_f32(tensor.data(), tensor.dtype())?;
-            let encoder_input = Tensor::<B, 3>::from_data(
-                TensorData::new(data, shape),
-                device,
-            );
+            let encoder_input = Tensor::<B, 3>::from_data(TensorData::new(data, shape), device);
             let tok_idx_t = st.tensor(&format!("tok_idx_{i}"))?;
-            let tok_shape: Vec<usize> = tok_idx_t.shape().iter().copied().collect();
+            let tok_shape: Vec<usize> = tok_idx_t.shape().to_vec();
             let tok_data: Vec<i32> = tok_idx_t
                 .data()
                 .chunks_exact(4)
                 .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
                 .collect();
-            let tok_idx = Tensor::<B, 2, Int>::from_data(
-                TensorData::new(tok_data, tok_shape),
-                device,
-            );
+            let tok_idx =
+                Tensor::<B, 2, Int>::from_data(TensorData::new(tok_data, tok_shape), device);
             let pos_t = st.tensor(&format!("chan_pos_{i}"))?;
-            let pos_shape: Vec<usize> = pos_t.shape().iter().copied().collect();
+            let pos_shape: Vec<usize> = pos_t.shape().to_vec();
             let pos_data = bytes_to_f32(pos_t.data(), pos_t.dtype())?;
-            let chan_pos = Tensor::<B, 2>::from_data(
-                TensorData::new(pos_data, pos_shape),
-                device,
-            );
+            let chan_pos = Tensor::<B, 2>::from_data(TensorData::new(pos_data, pos_shape), device);
             let n_channels = chan_pos.dims()[0];
             let s = tok_idx.dims()[0];
             let tc = s / n_channels;
@@ -284,7 +282,9 @@ mod burn_data {
         tc: usize,
         tf: usize,
     ) -> Tensor<B, 2> {
-        tokens.reshape([n_channels, tc, tf]).reshape([n_channels, tc * tf])
+        tokens
+            .reshape([n_channels, tc, tf])
+            .reshape([n_channels, tc * tf])
     }
 
     pub fn preprocessed_to_batch<B: Backend>(
@@ -294,19 +294,12 @@ mod burn_data {
         let s = ep.s;
         let tf = ep.tf;
         let c = ep.n_channels;
-        let encoder_input = Tensor::<B, 2>::from_data(
-            TensorData::new(ep.eeg_tokens, vec![s, tf]),
-            device,
-        )
-        .unsqueeze_dim::<3>(0);
-        let tok_idx = Tensor::<B, 2, Int>::from_data(
-            TensorData::new(ep.tok_idx, vec![s, 4]),
-            device,
-        );
-        let chan_pos = Tensor::<B, 2>::from_data(
-            TensorData::new(ep.chan_pos, vec![c, 3]),
-            device,
-        );
+        let encoder_input =
+            Tensor::<B, 2>::from_data(TensorData::new(ep.eeg_tokens, vec![s, tf]), device)
+                .unsqueeze_dim::<3>(0);
+        let tok_idx =
+            Tensor::<B, 2, Int>::from_data(TensorData::new(ep.tok_idx, vec![s, 4]), device);
+        let chan_pos = Tensor::<B, 2>::from_data(TensorData::new(ep.chan_pos, vec![c, 3]), device);
         InputBatch {
             encoder_input,
             tok_idx,
@@ -350,6 +343,6 @@ mod burn_data {
 
 #[cfg(feature = "burn")]
 pub use burn_data::{
-    InputBatch, build_tok_idx, chop_and_reshape, discretize_chan_pos, invert_reshape as invert_reshape_tensor,
-    load_batch, load_from_fif, preprocessed_to_batch,
+    build_tok_idx, chop_and_reshape, discretize_chan_pos, invert_reshape as invert_reshape_tensor,
+    load_batch, load_from_fif, preprocessed_to_batch, InputBatch,
 };

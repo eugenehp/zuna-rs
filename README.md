@@ -3,8 +3,9 @@
 **ZUNA EEG Foundation Model — fully Rust inference pipeline.**
 
 `zuna-rs` ports the ZUNA masked-diffusion autoencoder
-([Zyphra/ZUNA](https://huggingface.co/Zyphra/ZUNA)) entirely to Rust using the
-[Burn ML framework](https://burn.dev/).  All three stages — FIF reading, EEG
+([Zyphra/ZUNA](https://huggingface.co/Zyphra/ZUNA) and
+[Zyphra/ZUNA1.1](https://huggingface.co/Zyphra/ZUNA1.1)) entirely to Rust using
+the [Burn ML framework](https://burn.dev/).  All three stages — FIF reading, EEG
 preprocessing, and model inference — run without Python or PyTorch.
 
 ```
@@ -36,7 +37,7 @@ output.safetensors
 ## Prerequisites
 
 ```sh
-# Rust stable ≥ 1.78
+# Rust stable ≥ 1.87  (≥ 1.89 with the optional `burn` backend)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Python huggingface_hub — only needed for first-time weight download
@@ -120,6 +121,48 @@ cargo run --example embed --release -- --hf-cache /mnt/models/.cache
 
 ---
 
+## Checkpoints: ZUNA1 and ZUNA1.1
+
+Both released checkpoints are supported and ship the same two files
+(`model-00001-of-00001.safetensors` + `config.json`), so any command that takes
+`--repo` / `--weights` works with either:
+
+| repo | params | window | notes |
+|------|--------|--------|-------|
+| [`Zyphra/ZUNA`](https://huggingface.co/Zyphra/ZUNA)       | 380 M | `max_seqlen` 50  | original release |
+| [`Zyphra/ZUNA1.1`](https://huggingface.co/Zyphra/ZUNA1.1) | 380 M | `max_seqlen` 256 | variable-length masking up to 30 s |
+
+```sh
+# ZUNA1.1 weights into the standard HuggingFace cache
+cargo run --bin download_weights --features hf-download -- --repo Zyphra/ZUNA1.1
+```
+
+**Version detection is automatic.** `config.json` records neither of the two
+architectural differences — upstream hard-codes them in `lingua/transformer.py`
+— so `zuna-rs` detects them from the tensor names and reports the result at load
+time (`Detected ZUNA1.1 — n_heads = 8`). The differences ZUNA1.1 introduces:
+
+- **QK-norm** — a per-head `RMSNorm(head_dim)` on Q and K, applied *before*
+  RoPE, in encoder self-attention and in both decoder attentions
+  (`…attention.{q,k}_norm.weight`, ε hard-coded to `1e-5` upstream).
+- **Sandwich norm** — an `RMSNorm(dim)` on every sub-layer output *before* the
+  residual add, i.e. `x + post(sublayer(pre(x)))`
+  (`…{attention,cross_attention,ffn}_norm_post.weight`).
+- **Key spelling** — ZUNA1.1 wraps each plain RMSNorm in a `torch.nn.RMSNorm`
+  sub-module, so scales move from `…ffn_norm.weight` to
+  `…ffn_norm.norm.weight`. The loader canonicalises these back to the ZUNA1
+  spelling, keeping one namespace for both versions.
+
+Everything else — 4-D axial RoPE, SwiGLU, AdaRMSNorm conditioning, the MMD
+bottleneck, and the rectified-flow sampler — is unchanged between the two.
+
+`ModelConfig::validate()` rejects, rather than silently mis-running, a
+`config.json` that turns on a feature this crate does not implement
+(`ape_dim > 0`, `seqlen_t`, `zero_spatial`, a non-`{x,y,z,tc}` `tok_idx_type`,
+or `rope_dim != 4`). Neither released checkpoint uses any of them.
+
+---
+
 ## Examples
 
 ### `infer` — full encode → diffuse → decode pipeline
@@ -152,7 +195,7 @@ Options:
 
 #### Timing — wall-clock per phase
 
-![infer timing](./figures/infer_timing.png)
+![infer timing](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/infer_timing.png)
 
 Weight load (~3.3 s) and encode (~10.6 s) are shared with the embed example.
 Decode dominates: 50 rectified-flow Euler steps × 3 epochs ≈ **375 s** on CPU
@@ -160,7 +203,7 @@ Decode dominates: 50 rectified-flow Euler steps × 3 epochs ≈ **375 s** on CPU
 
 #### Reconstructed waveforms — first epoch (≤8 channels)
 
-![infer waveforms](./figures/infer_waveforms.png)
+![infer waveforms](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/infer_waveforms.png)
 
 Overlay of input (original, normalised) and decoder output per channel.
 Reconstruction quality reflects both the MMD regularisation strength and the
@@ -168,7 +211,7 @@ number of diffusion steps.
 
 #### Per-epoch statistics
 
-![infer epoch stats](./figures/infer_epoch_stats.png)
+![infer epoch stats](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/infer_epoch_stats.png)
 
 Mean, ±std envelope, and min/max range for each decoded epoch.
 All three epochs sit near mean ≈ 0, std ≈ 1 after the diffusion prior.
@@ -195,14 +238,14 @@ Extra options vs infer:
 
 #### Timing — wall-clock per phase
 
-![embed timing](./figures/embed_timing.png)
+![embed timing](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/embed_timing.png)
 
 Encoder forward pass dominates (~9.4 s for 3 epochs on CPU).  
 Weight loading is a one-time cost (~1.8 s); FIF preprocessing is negligible (~6 ms).
 
 #### Embedding value distribution vs N(0,1)
 
-![embed distribution](./figures/embed_distribution.png)
+![embed distribution](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/embed_distribution.png)
 
 ZUNA is trained with an MMD loss that pushes the encoder output toward **N(0, I)**.
 The histogram should be approximately bell-shaped and centred at zero.
@@ -210,7 +253,7 @@ The slight narrowing (std ≈ 0.86 vs ideal 1.0) is expected for this recording 
 
 #### Per-dimension statistics (MMD health check)
 
-![embed dim stats](./figures/embed_dim_stats.png)
+![embed dim stats](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/embed_dim_stats.png)
 
 Each of the 32 latent dimensions should have mean ≈ 0 and std ≈ 1 across tokens.
 Dimensions with large mean offsets indicate residual encoder bias.
@@ -435,7 +478,7 @@ Optional: `scipy` (KL divergence)
 | Encoder fwd    |    9470.8 |    224.0 |
 | **Total**      | **11196.5** |    221.1 |
 
-![Speed](./figures/bench_speed_cpu_unknown.png)
+![Speed](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/bench_speed_cpu_unknown.png)
 
 ### Python NumPy vs Rust precision
 
@@ -451,8 +494,8 @@ differences reflect float32 rounding order only.
 | Relative error  | `3.44e-07` |
 | Python encode   | `1952.2 ms/epoch` |
 
-![Precision](./figures/bench_precision_cpu_unknown.png)
-![Error](./figures/bench_py_vs_rust_cpu_unknown.png)
+![Precision](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/bench_precision_cpu_unknown.png)
+![Error](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/bench_py_vs_rust_cpu_unknown.png)
 
 ### Embedding distribution (MMD regularlisation)
 
@@ -464,12 +507,12 @@ ZUNA trains with an MMD loss that pushes embeddings toward **N(0, I)**.
 | Global std    | `0.8601` |
 | n_dims        | `32` |
 
-![Distribution](./figures/bench_distribution_cpu_unknown.png)
-![Dim stats](./figures/bench_dim_stats_cpu_unknown.png)
+![Distribution](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/bench_distribution_cpu_unknown.png)
+![Dim stats](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/bench_dim_stats_cpu_unknown.png)
 
 ### Run consistency
 
-![Consistency](./figures/bench_run_consistency_cpu_unknown.png)
+![Consistency](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/bench_run_consistency_cpu_unknown.png)
 
 <!-- BENCHMARK_END -->
 
@@ -489,7 +532,7 @@ These three charts are written by the `infer` example and require `--full` or
 
 #### Timing breakdown
 
-![infer timing](./figures/infer_timing.png)
+![infer timing](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/infer_timing.png)
 
 Weight loading and encoding are the same as the embed example.
 Decoding (50 Euler diffusion steps × 3 epochs) dominates at **~375 s** on CPU;
@@ -499,7 +542,7 @@ Metal GPU reduces this to ~95 s (~4×).
 
 #### Reconstructed waveforms — first epoch
 
-![infer waveforms](./figures/infer_waveforms.png)
+![infer waveforms](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/infer_waveforms.png)
 
 Input signal (after normalisation) overlaid with the decoder reconstruction.
 The model reconstructs plausible EEG morphology without seeing the original signal
@@ -509,7 +552,7 @@ during decoding — driven entirely by the latent embedding and diffusion prior.
 
 #### Per-epoch statistics
 
-![infer epoch stats](./figures/infer_epoch_stats.png)
+![infer epoch stats](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/infer_epoch_stats.png)
 
 Mean ± std and min/max per decoded epoch.
 Global std ≈ 0.84–1.1 across the three epochs, consistent with the N(0,1)
@@ -523,7 +566,7 @@ These three charts are written by the `embed` example on every `benchmark.sh` ru
 
 #### Timing breakdown
 
-![Encoder timing](./figures/embed_timing.png)
+![Encoder timing](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/embed_timing.png)
 
 Weight loading (≈1.9 s) is a one-time startup cost; subsequent calls pay only the encode cost (~3.2 s/epoch on CPU, ~0.8 s on Metal GPU).
 
@@ -531,7 +574,7 @@ Weight loading (≈1.9 s) is a one-time startup cost; subsequent calls pay only 
 
 #### Embedding value distribution vs N(0,1)
 
-![Embedding distribution](./figures/embed_distribution.png)
+![Embedding distribution](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/embed_distribution.png)
 
 The histogram closely follows N(0,1) (red curve).  
 KL(embeddings ‖ N(0,1)) ≈ **0.023 nats** — the MMD bottleneck is working as intended.
@@ -540,7 +583,7 @@ KL(embeddings ‖ N(0,1)) ≈ **0.023 nats** — the MMD bottleneck is working a
 
 #### Per-dimension statistics (MMD health check)
 
-![Per-dimension stats](./figures/embed_dim_stats.png)
+![Per-dimension stats](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/embed_dim_stats.png)
 
 Each of the 32 latent dimensions should sit near mean ≈ 0, std ≈ 1.  
 The slight narrowing (global std ≈ 0.86) is expected for a 15 s recording.
@@ -716,7 +759,7 @@ cargo run --example embed --release --features blas-accelerate -- --threads 4
 
 ### Encoder performance (3 epochs, 12 channels)
 
-![Backend comparison](./figures/backend_comparison.png)
+![Backend comparison](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/backend_comparison.png)
 
 | Backend | Encode | Per epoch | vs default | Precision (vs CPU) |
 |---|---|---|---|---|
@@ -740,7 +783,7 @@ outputs against f32 before using in precision-sensitive pipelines.
 Encoder forward pass (1 epoch, best of 3 runs) across backends and channel
 counts.  Run with `cargo run --example backend_bench --release --features ndarray,mlx,wgpu`.
 
-![Backend × Channel benchmark](./figures/backend_channel_bench.png)
+![Backend × Channel benchmark](https://raw.githubusercontent.com/eugenehp/zuna-rs/main/figures/backend_channel_bench.png)
 
 | Backend | 4 ch | 8 ch | 12 ch | 19 ch | 32 ch | 64 ch |
 |---|---|---|---|---|---|---|

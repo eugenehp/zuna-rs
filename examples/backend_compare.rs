@@ -78,8 +78,8 @@ fn make_synthetic_rlx_epoch(n_ch: usize) -> (Vec<f32>, Vec<i32>, Vec<f32>, usize
     let tc = 40usize;
     let s = n_ch * tc;
     let mut eeg_tokens = vec![0f32; s * tf];
-    for i in 0..eeg_tokens.len() {
-        eeg_tokens[i] = (i as f32) * 0.001 - 0.5;
+    for (i, v) in eeg_tokens.iter_mut().enumerate() {
+        *v = (i as f32) * 0.001 - 0.5;
     }
     let mut tok_idx = vec![0i32; s * 4];
     for ch in 0..n_ch {
@@ -87,7 +87,7 @@ fn make_synthetic_rlx_epoch(n_ch: usize) -> (Vec<f32>, Vec<i32>, Vec<f32>, usize
         let y_bin = ((ch * 7) % 50) as i32;
         for t in 0..tc {
             let row = ch * tc + t;
-            tok_idx[row * 4]     = x_bin;
+            tok_idx[row * 4] = x_bin;
             tok_idx[row * 4 + 1] = y_bin;
             tok_idx[row * 4 + 2] = 25;
             tok_idx[row * 4 + 3] = t as i32;
@@ -111,33 +111,30 @@ mod burn_bench {
         let tf = zuna_rs::DataConfig::default().num_fine_time_pts;
         let tc = 40usize;
         let n_tokens = n_ch * tc;
-        let encoder_input = Tensor::<B, 3>::random(
-            [1, n_tokens, tf],
-            Distribution::Normal(0.0, 1.0),
-            device,
-        );
+        let encoder_input =
+            Tensor::<B, 3>::random([1, n_tokens, tf], Distribution::Normal(0.0, 1.0), device);
         let mut idx_data = vec![0i64; n_tokens * 4];
         for ch in 0..n_ch {
             let x_bin = (ch * 49 / n_ch.max(1)) as i64;
             let y_bin = ((ch * 7) % 50) as i64;
             for t in 0..tc {
                 let row = ch * tc + t;
-                idx_data[row * 4]     = x_bin;
+                idx_data[row * 4] = x_bin;
                 idx_data[row * 4 + 1] = y_bin;
                 idx_data[row * 4 + 2] = 25;
                 idx_data[row * 4 + 3] = t as i64;
             }
         }
-        let tok_idx = Tensor::<B, 2, Int>::from_data(
-            TensorData::new(idx_data, [n_tokens, 4]),
-            device,
-        );
-        let chan_pos = Tensor::<B, 2>::random(
-            [n_ch, 3],
-            Distribution::Normal(0.0, 0.05),
-            device,
-        );
-        InputBatch { encoder_input, tok_idx, chan_pos, n_channels: n_ch, tc }
+        let tok_idx =
+            Tensor::<B, 2, Int>::from_data(TensorData::new(idx_data, [n_tokens, 4]), device);
+        let chan_pos = Tensor::<B, 2>::random([n_ch, 3], Distribution::Normal(0.0, 0.05), device);
+        InputBatch {
+            encoder_input,
+            tok_idx,
+            chan_pos,
+            n_channels: n_ch,
+            tc,
+        }
     }
 
     fn bench_encoder<B: Backend>(
@@ -197,12 +194,17 @@ mod burn_bench {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 ZunaEncoder::<NdArray>::load(config_path, weights_path, NdArrayDevice::Cpu)
             })) {
-                Ok(Ok((enc, _))) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    bench_encoder("Burn", name, &enc, channel_counts, n_warmup, n_runs)
-                })) {
-                    Ok(r) => { all.extend(r); eprintln!("ok"); }
-                    Err(_) => eprintln!("SKIP (panic during run)"),
-                },
+                Ok(Ok((enc, _))) => {
+                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        bench_encoder("Burn", name, &enc, channel_counts, n_warmup, n_runs)
+                    })) {
+                        Ok(r) => {
+                            all.extend(r);
+                            eprintln!("ok");
+                        }
+                        Err(_) => eprintln!("SKIP (panic during run)"),
+                    }
+                }
                 Ok(Err(_)) => eprintln!("SKIP"),
                 Err(_) => eprintln!("SKIP (panic on load)"),
             }
@@ -215,12 +217,17 @@ mod burn_bench {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 ZunaEncoder::<Wgpu>::load(config_path, weights_path, WgpuDevice::DefaultDevice)
             })) {
-                Ok(Ok((enc, _))) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    bench_encoder("Burn", "wgpu f32", &enc, channel_counts, n_warmup, n_runs)
-                })) {
-                    Ok(r) => { all.extend(r); eprintln!("ok"); }
-                    Err(_) => eprintln!("SKIP (panic during run)"),
-                },
+                Ok(Ok((enc, _))) => {
+                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        bench_encoder("Burn", "wgpu f32", &enc, channel_counts, n_warmup, n_runs)
+                    })) {
+                        Ok(r) => {
+                            all.extend(r);
+                            eprintln!("ok");
+                        }
+                        Err(_) => eprintln!("SKIP (panic during run)"),
+                    }
+                }
                 Ok(Err(_)) => eprintln!("SKIP"),
                 Err(_) => eprintln!("SKIP (panic on load)"),
             }
@@ -233,12 +240,17 @@ mod burn_bench {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 ZunaEncoder::<Mlx>::load(config_path, weights_path, MlxDevice::Gpu)
             })) {
-                Ok(Ok((enc, _))) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    bench_encoder("Burn", "MLX f32", &enc, channel_counts, n_warmup, n_runs)
-                })) {
-                    Ok(r) => { all.extend(r); eprintln!("ok"); }
-                    Err(_) => eprintln!("SKIP (panic during run)"),
-                },
+                Ok(Ok((enc, _))) => {
+                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        bench_encoder("Burn", "MLX f32", &enc, channel_counts, n_warmup, n_runs)
+                    })) {
+                        Ok(r) => {
+                            all.extend(r);
+                            eprintln!("ok");
+                        }
+                        Err(_) => eprintln!("SKIP (panic during run)"),
+                    }
+                }
                 Ok(Err(_)) => eprintln!("SKIP"),
                 Err(_) => eprintln!("SKIP (panic on load)"),
             }
@@ -307,7 +319,10 @@ mod rlx_bench {
                     bench_encoder(label, &mut enc, channel_counts, n_warmup, n_runs)
                 }));
                 match r {
-                    Ok(v) => { eprintln!("ok"); v }
+                    Ok(v) => {
+                        eprintln!("ok");
+                        v
+                    }
                     Err(_) => {
                         eprintln!("SKIP (panic during run)");
                         Vec::new()
@@ -515,8 +530,12 @@ fn main() -> anyhow::Result<()> {
                 .map(|r| r.min_ms())
                 .fold(f64::INFINITY, f64::min);
             if burn_best.is_finite() && rlx_best.is_finite() {
-                println!("  {ch:>3} ch: {:.2}x  (Burn {:.0} ms vs RLX {:.0} ms)",
-                    burn_best / rlx_best, burn_best, rlx_best);
+                println!(
+                    "  {ch:>3} ch: {:.2}x  (Burn {:.0} ms vs RLX {:.0} ms)",
+                    burn_best / rlx_best,
+                    burn_best,
+                    rlx_best
+                );
             }
         }
     }

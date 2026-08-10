@@ -1,15 +1,15 @@
-/// SwiGLU Feed-Forward Network (burn 0.20.1)
-///
-/// Python (`FeedForward` in lingua/transformer.py):
-///   w1, w3 : Linear(dim, hidden_dim, bias=False)
-///   w2     : Linear(hidden_dim, dim, bias=False)
-///   forward(x) = w2(silu(w1(x)) * w3(x))
-///
-/// hidden_dim = 256 × ⌈int(2×4×dim/3) / 256⌉ = 2816 for dim=1024.
-use burn::prelude::*;
-use burn::nn::Linear;
-use burn::tensor::activation::silu;
+//! SwiGLU Feed-Forward Network (burn 0.20.1)
+//!
+//! Python (`FeedForward` in lingua/transformer.py):
+//!   w1, w3 : Linear(dim, hidden_dim, bias=False)
+//!   w2     : Linear(hidden_dim, dim, bias=False)
+//!   forward(x) = w2(silu(w1(x)) * w3(x))
+//!
+//! hidden_dim = 256 × ⌈int(2×4×dim/3) / 256⌉ = 2816 for dim=1024.
 use crate::model::linear_zeros;
+use burn::nn::Linear;
+use burn::prelude::*;
+use burn::tensor::activation::silu;
 
 #[derive(Module, Debug)]
 pub struct FeedForward<B: Backend> {

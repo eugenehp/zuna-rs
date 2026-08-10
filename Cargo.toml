@@ -1,7 +1,8 @@
 [package]
 name = "zuna-rs"
-version = "0.2.0"
+version = "0.2.2"
 edition = "2021"
+rust-version = "1.87"   # 1.89 with the optional `burn` backend
 description = "ZUNA EEG Foundation Model — inference in Rust (Burn and/or RLX)"
 keywords      = ["exg", "foundational", "BCI", "GPU", "CPU"]
 authors       = ["Eugene Hauptmann"]
@@ -51,6 +52,11 @@ name = "backend_compare"
 path = "examples/backend_compare.rs"
 required-features = ["rlx", "rlx-cpu"]
 
+[[example]]
+name = "encode_dir"
+path = "examples/encode_dir.rs"
+required-features = ["rlx", "rlx-cpu"]
+
 # ── Tests ──────────────────────────────────────────────────────────────────
 [[test]]
 name = "rlx_graph_compile"
@@ -58,9 +64,14 @@ path = "tests/rlx_graph_compile.rs"
 required-features = ["rlx"]
 
 [[test]]
+name = "zuna11_weights"
+path = "tests/zuna11_weights.rs"
+required-features = ["rlx", "rlx-cpu"]
+
+[[test]]
 name = "mlx_op_parity"
 path = "tests/mlx_op_parity.rs"
-required-features = ["rlx", "mlx"]
+required-features = ["rlx", "rlx-mlx"]
 
 [[test]]
 name = "parity_rlx_vs_python"
@@ -125,9 +136,9 @@ burn = { version = "0.20.1", default-features = false, features = ["std", "simd"
 burn-ndarray = { version = "0.20.1", default-features = false, features = ["std", "simd", "multi-threads"], optional = true }
 burn-mlx = { version = "0.1", git = "https://github.com/eidola-ai/burn-mlx", optional = true }
 
-rlx = { version = "0.2", default-features = false, optional = true }
+rlx = { version = "0.2.13", default-features = false, optional = true }
 
-exg = { version = "0.0.3", default-features = false }
+exg = { version = "0.0.6", default-features = false }
 ndarray = "0.17"
 safetensors = "0.7"
 half = { version = "2", features = ["bytemuck"] }
@@ -153,3 +164,7 @@ strip = true
 
 [patch.crates-io]
 cubek-matmul = { git = "https://github.com/eugenehp/cubek.git", branch = "cubek-matmul", package = "cubek-matmul" }
+# For local rlx development, add path overrides here — e.g.
+#   rlx-opt = { path = "../rlx/crates/core/rlx-opt" }
+# `[patch]` entries are ignored by downstream consumers, so they must
+# not be committed pointing at paths that only exist on one machine.

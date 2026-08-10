@@ -32,7 +32,7 @@ use anyhow::Context;
 use burn::prelude::*;
 
 use crate::{
-    config::{DataConfig, ModelConfig},
+    config::{DataConfig, ModelArch, ModelConfig},
     data::{load_batch, load_from_fif, FifInfo, InputBatch},
     model::{encoder::EncoderTransformer, rope::RotaryEmbedding},
     weights::load_encoder_weights,
@@ -73,9 +73,15 @@ pub struct EpochEmbedding {
 
 impl EpochEmbedding {
     /// Total number of tokens  S = n_channels × tc.
-    #[inline] pub fn n_tokens(&self) -> usize { self.n_channels * self.tc }
+    #[inline]
+    pub fn n_tokens(&self) -> usize {
+        self.n_channels * self.tc
+    }
     /// Output dimension of the encoder bottleneck (32 by default).
-    #[inline] pub fn output_dim(&self) -> usize { self.shape.get(1).copied().unwrap_or(0) }
+    #[inline]
+    pub fn output_dim(&self) -> usize {
+        self.shape.get(1).copied().unwrap_or(0)
+    }
 }
 
 /// Collection of per-epoch embeddings returned by [`ZunaEncoder`].
@@ -104,18 +110,30 @@ impl EncodingResult {
         use safetensors::{Dtype, View};
         use std::borrow::Cow;
 
-        struct RawTensor { data: Vec<u8>, shape: Vec<usize>, dtype: Dtype }
+        struct RawTensor {
+            data: Vec<u8>,
+            shape: Vec<usize>,
+            dtype: Dtype,
+        }
         impl View for RawTensor {
-            fn dtype(&self)    -> Dtype         { self.dtype }
-            fn shape(&self)    -> &[usize]      { &self.shape }
-            fn data(&self)     -> Cow<'_, [u8]> { Cow::Borrowed(&self.data) }
-            fn data_len(&self) -> usize          { self.data.len() }
+            fn dtype(&self) -> Dtype {
+                self.dtype
+            }
+            fn shape(&self) -> &[usize] {
+                &self.shape
+            }
+            fn data(&self) -> Cow<'_, [u8]> {
+                Cow::Borrowed(&self.data)
+            }
+            fn data_len(&self) -> usize {
+                self.data.len()
+            }
         }
 
         let f32_bytes = |v: &[f32]| -> Vec<u8> { v.iter().flat_map(|f| f.to_le_bytes()).collect() };
         let i64_bytes = |v: &[i64]| -> Vec<u8> { v.iter().flat_map(|i| i.to_le_bytes()).collect() };
 
-        let mut keys:    Vec<String>    = Vec::new();
+        let mut keys: Vec<String> = Vec::new();
         let mut tensors: Vec<RawTensor> = Vec::new();
 
         for (i, ep) in self.epochs.iter().enumerate() {
@@ -145,7 +163,11 @@ impl EncodingResult {
 
         let n = self.epochs.len() as f32;
         keys.push("n_samples".into());
-        tensors.push(RawTensor { data: f32_bytes(&[n]), shape: vec![1], dtype: Dtype::F32 });
+        tensors.push(RawTensor {
+            data: f32_bytes(&[n]),
+            shape: vec![1],
+            dtype: Dtype::F32,
+        });
 
         let pairs: Vec<(&str, RawTensor)> = keys.iter().map(|s| s.as_str()).zip(tensors).collect();
         let bytes = safetensors::serialize(pairs, None)?;
@@ -167,13 +189,15 @@ impl EncodingResult {
 /// - CPU (default): `--features ndarray`
 /// - GPU: `--no-default-features --features wgpu`
 pub struct ZunaEncoder<B: Backend> {
-    encoder:       EncoderTransformer<B>,
-    rope:          RotaryEmbedding<B>,
+    encoder: EncoderTransformer<B>,
+    rope: RotaryEmbedding<B>,
     /// Architecture hyperparameters (from config.json).
     pub model_cfg: ModelConfig,
+    /// Checkpoint architecture, detected from the weight names.
+    pub arch: ModelArch,
     /// Preprocessing / tokenisation parameters.
-    pub data_cfg:  DataConfig,
-    device:        B::Device,
+    pub data_cfg: DataConfig,
+    device: B::Device,
 }
 
 impl<B: Backend> ZunaEncoder<B> {
@@ -185,32 +209,50 @@ impl<B: Backend> ZunaEncoder<B> {
     ///
     /// Returns `(encoder, weight_load_ms)`.
     pub fn load(
-        config_path:  &Path,
+        config_path: &Path,
         weights_path: &Path,
-        device:       B::Device,
+        device: B::Device,
     ) -> anyhow::Result<(Self, f64)> {
         let cfg_str = std::fs::read_to_string(config_path)
             .with_context(|| format!("config: {}", config_path.display()))?;
         let hf_val: serde_json::Value = serde_json::from_str(&cfg_str)?;
-        let model_cfg: ModelConfig = serde_json::from_value(hf_val["model"].clone())
-            .context("parsing model config")?;
+        let model_cfg: ModelConfig =
+            serde_json::from_value(hf_val["model"].clone()).context("parsing model config")?;
+        model_cfg
+            .validate()
+            .with_context(|| format!("unsupported config: {}", config_path.display()))?;
 
         let rope = RotaryEmbedding::<B>::new(
-            model_cfg.head_dim, model_cfg.rope_dim,
-            model_cfg.max_seqlen, model_cfg.rope_theta, &device,
+            model_cfg.head_dim,
+            model_cfg.rope_dim,
+            model_cfg.max_seqlen,
+            model_cfg.rope_theta,
+            &device,
         );
 
         let t = Instant::now();
-        let (encoder, n_heads) = load_encoder_weights::<B>(
+        let (encoder, n_heads, arch) = load_encoder_weights::<B>(
             &model_cfg,
-            weights_path.to_str().context("weights path not valid UTF-8")?,
+            weights_path
+                .to_str()
+                .context("weights path not valid UTF-8")?,
             &device,
         )?;
         let ms = t.elapsed().as_secs_f64() * 1000.0;
 
-        println!("Detected n_heads = {n_heads}");
+        println!("Detected {} — n_heads = {n_heads}", arch.label());
 
-        Ok((Self { encoder, rope, model_cfg, data_cfg: DataConfig::default(), device }, ms))
+        Ok((
+            Self {
+                encoder,
+                rope,
+                model_cfg,
+                arch,
+                data_cfg: DataConfig::default(),
+                device,
+            },
+            ms,
+        ))
     }
 
     // ── Accessors ─────────────────────────────────────────────────────────────
@@ -219,8 +261,12 @@ impl<B: Backend> ZunaEncoder<B> {
     pub fn describe(&self) -> String {
         let c = &self.model_cfg;
         format!(
-            "ZUNA encoder  dim={}  layers={}  head_dim={}  out_dim={}",
-            c.dim, c.n_layers, c.head_dim, c.encoder_output_dim,
+            "{} encoder  dim={}  layers={}  head_dim={}  out_dim={}",
+            self.arch.label(),
+            c.dim,
+            c.n_layers,
+            c.head_dim,
+            c.encoder_output_dim,
         )
     }
 
@@ -231,22 +277,23 @@ impl<B: Backend> ZunaEncoder<B> {
     /// `data_norm` is the same divisor used to train ZUNA (default: 10.0).
     /// It is applied during preprocessing; the encoder output is **not**
     /// re-scaled — it reflects the MMD-regularised latent space directly.
-    pub fn encode_fif(
-        &self,
-        fif_path:  &Path,
-        data_norm: f32,
-    ) -> anyhow::Result<EncodingResult> {
+    pub fn encode_fif(&self, fif_path: &Path, data_norm: f32) -> anyhow::Result<EncodingResult> {
         let t_pp = Instant::now();
-        let (batches, fif_info) = load_from_fif::<B>(
-            fif_path, &self.data_cfg, data_norm, &self.device,
-        ).with_context(|| format!("exg on {}", fif_path.display()))?;
+        let (batches, fif_info) =
+            load_from_fif::<B>(fif_path, &self.data_cfg, data_norm, &self.device)
+                .with_context(|| format!("exg on {}", fif_path.display()))?;
         let ms_preproc = t_pp.elapsed().as_secs_f64() * 1000.0;
 
         let t_enc = Instant::now();
         let epochs = self.encode_inputs(batches)?;
         let ms_encode = t_enc.elapsed().as_secs_f64() * 1000.0;
 
-        Ok(EncodingResult { epochs, fif_info: Some(fif_info), ms_preproc, ms_encode })
+        Ok(EncodingResult {
+            epochs,
+            fif_info: Some(fif_info),
+            ms_preproc,
+            ms_encode,
+        })
     }
 
     /// Encode a pre-processed safetensors batch (Python / legacy input path).
@@ -254,10 +301,7 @@ impl<B: Backend> ZunaEncoder<B> {
     /// The batch is assumed to already be normalised (÷ data_norm); the
     /// `data_norm` argument is **not** applied again here — it exists only to
     /// document the convention used when the file was created.
-    pub fn encode_batch(
-        &self,
-        batch_path: &Path,
-    ) -> anyhow::Result<EncodingResult> {
+    pub fn encode_batch(&self, batch_path: &Path) -> anyhow::Result<EncodingResult> {
         let t_pp = Instant::now();
         let batches = load_batch::<B>(batch_path, &self.data_cfg, &self.device)?;
         let ms_preproc = t_pp.elapsed().as_secs_f64() * 1000.0;
@@ -266,7 +310,12 @@ impl<B: Backend> ZunaEncoder<B> {
         let epochs = self.encode_inputs(batches)?;
         let ms_encode = t_enc.elapsed().as_secs_f64() * 1000.0;
 
-        Ok(EncodingResult { epochs, fif_info: None, ms_preproc, ms_encode })
+        Ok(EncodingResult {
+            epochs,
+            fif_info: None,
+            ms_preproc,
+            ms_encode,
+        })
     }
 
     /// Encode a single prepared [`InputBatch`], returning the raw encoder
@@ -305,8 +354,8 @@ impl<B: Backend> ZunaEncoder<B> {
         fif_paths: &[impl AsRef<Path> + Sync],
         data_norm: f32,
     ) -> anyhow::Result<Vec<EncodingResult>> {
-        use rayon::prelude::*;
         use crate::data::{preprocess_fif_cpu, preprocessed_to_batch, PreprocessedFif};
+        use rayon::prelude::*;
 
         let data_cfg = self.data_cfg.clone();
 
@@ -341,7 +390,9 @@ impl<B: Backend> ZunaEncoder<B> {
 
         // Phase 3: split results back per file.
         let mut emb_iter = all_embeddings.into_iter();
-        let results = file_epoch_counts.into_iter().zip(fif_infos)
+        let results = file_epoch_counts
+            .into_iter()
+            .zip(fif_infos)
             .map(|(count, info)| {
                 let epochs: Vec<EpochEmbedding> = (&mut emb_iter).take(count).collect();
                 EncodingResult {
@@ -365,7 +416,7 @@ impl<B: Backend> ZunaEncoder<B> {
     /// or to export the pre-tokenised tensors for external comparison.
     pub fn preprocess_fif(
         &self,
-        fif_path:  &Path,
+        fif_path: &Path,
         data_norm: f32,
     ) -> anyhow::Result<(Vec<InputBatch<B>>, FifInfo)> {
         load_from_fif(fif_path, &self.data_cfg, data_norm, &self.device)
@@ -380,7 +431,9 @@ impl<B: Backend> ZunaEncoder<B> {
     }
 
     /// Reference to the Burn device this encoder was loaded on.
-    pub fn device(&self) -> &B::Device { &self.device }
+    pub fn device(&self) -> &B::Device {
+        &self.device
+    }
 
     // ── Internal ──────────────────────────────────────────────────────────────
 
@@ -406,21 +459,17 @@ impl<B: Backend> ZunaEncoder<B> {
 
     /// Encode multiple epochs in a single batched forward pass.
     /// All epochs must have the same sequence length S (same channel layout).
-    fn encode_batched(
-        &self,
-        batches: Vec<InputBatch<B>>,
-    ) -> anyhow::Result<Vec<EpochEmbedding>> {
+    fn encode_batched(&self, batches: Vec<InputBatch<B>>) -> anyhow::Result<Vec<EpochEmbedding>> {
         let n = batches.len();
 
         // Save per-epoch metadata before consuming
-        let metadata: Vec<_> = batches.iter().map(|b| {
-            (b.n_channels, b.tc, b.tok_idx.clone(), b.chan_pos.clone())
-        }).collect();
+        let metadata: Vec<_> = batches
+            .iter()
+            .map(|b| (b.n_channels, b.tc, b.tok_idx.clone(), b.chan_pos.clone()))
+            .collect();
 
         // Stack encoder inputs: [1, S, d] × N → [N, S, d]
-        let inputs: Vec<Tensor<B, 3>> = batches.into_iter()
-            .map(|b| b.encoder_input)
-            .collect();
+        let inputs: Vec<Tensor<B, 3>> = batches.into_iter().map(|b| b.encoder_input).collect();
         let stacked = Tensor::cat(inputs, 0); // [N, S, d]
 
         // tok_idx is shared (same recording) — use first
@@ -435,22 +484,32 @@ impl<B: Backend> ZunaEncoder<B> {
             .map(|i| enc_out.clone().narrow(0, i, 1)) // [1, S, output_dim]
             .collect();
 
-        per_epoch.into_iter().zip(metadata.into_iter())
+        per_epoch
+            .into_iter()
+            .zip(metadata)
             .map(|(enc, (n_channels, tc, tok_idx_saved, chan_pos_saved))| {
                 let [_, s, od] = enc.dims();
-                let embeddings = enc.squeeze::<2>().into_data()
-                    .convert::<f32>().to_vec::<f32>()
+                let embeddings = enc
+                    .squeeze::<2>()
+                    .into_data()
+                    .convert::<f32>()
+                    .to_vec::<f32>()
                     .map_err(|e| anyhow::anyhow!("embedding→vec: {e:?}"))?;
 
                 let tok_idx_data = tok_idx_saved.into_data();
                 let tok_idx: Vec<i64> = tok_idx_data
                     .to_vec::<i64>()
-                    .or_else(|_| tok_idx_data.to_vec::<i32>()
-                        .map(|v| v.into_iter().map(|x| x as i64).collect()))
+                    .or_else(|_| {
+                        tok_idx_data
+                            .to_vec::<i32>()
+                            .map(|v| v.into_iter().map(|x| x as i64).collect())
+                    })
                     .map_err(|e| anyhow::anyhow!("tok_idx→vec: {e:?}"))?;
 
-                let chan_pos = chan_pos_saved.into_data()
-                    .convert::<f32>().to_vec::<f32>()
+                let chan_pos = chan_pos_saved
+                    .into_data()
+                    .convert::<f32>()
+                    .to_vec::<f32>()
                     .map_err(|e| anyhow::anyhow!("chan_pos→vec: {e:?}"))?;
 
                 Ok(EpochEmbedding {
@@ -467,18 +526,16 @@ impl<B: Backend> ZunaEncoder<B> {
 
     fn encode_one(&self, batch: InputBatch<B>) -> anyhow::Result<EpochEmbedding> {
         let n_channels = batch.n_channels;
-        let tc         = batch.tc;
+        let tc = batch.tc;
 
         // Keep a copy of tok_idx and chan_pos before the encoder consumes them.
-        let tok_idx_saved  = batch.tok_idx.clone();
+        let tok_idx_saved = batch.tok_idx.clone();
         let chan_pos_saved = batch.chan_pos.clone();
 
         // Run encoder: [1, S, output_dim]
-        let enc_out = self.encoder.forward(
-            batch.encoder_input,
-            batch.tok_idx,
-            &self.rope,
-        );
+        let enc_out = self
+            .encoder
+            .forward(batch.encoder_input, batch.tok_idx, &self.rope);
         let [_, s, output_dim] = enc_out.dims();
 
         // Squeeze batch dim → [S, output_dim] and extract as Vec<f32>.
@@ -494,8 +551,11 @@ impl<B: Backend> ZunaEncoder<B> {
         let tok_idx_data = tok_idx_saved.into_data();
         let tok_idx: Vec<i64> = tok_idx_data
             .to_vec::<i64>()
-            .or_else(|_| tok_idx_data.to_vec::<i32>()
-                .map(|v| v.into_iter().map(|x| x as i64).collect()))
+            .or_else(|_| {
+                tok_idx_data
+                    .to_vec::<i32>()
+                    .map(|v| v.into_iter().map(|x| x as i64).collect())
+            })
             .map_err(|e| anyhow::anyhow!("tok_idx→vec: {e:?}"))?;
 
         // chan_pos [C, 3] → Vec<f32>.

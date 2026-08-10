@@ -1,17 +1,22 @@
-/// download_weights — fetch ZUNA model weights from HuggingFace.
-///
-/// Uses the `hf-hub` crate (same cache layout as Python `huggingface_hub`):
-///   ~/.cache/huggingface/hub/models--Zyphra--ZUNA/snapshots/<hash>/…
-///
-/// A live progress bar is shown during download; already-cached files
-/// are returned instantly with no network traffic.
-///
-/// Usage:
-///   download_weights [--repo Zyphra/ZUNA] [--cache-dir ~/.cache/huggingface/hub]
-///
-/// Prints two lines to stdout (for shell capture):
-///   /path/to/model-00001-of-00001.safetensors
-///   /path/to/config.json
+//! download_weights — fetch ZUNA model weights from HuggingFace.
+//!
+//! Uses the `hf-hub` crate (same cache layout as Python `huggingface_hub`):
+//!   ~/.cache/huggingface/hub/models--Zyphra--ZUNA/snapshots/<hash>/…
+//!
+//! A live progress bar is shown during download; already-cached files
+//! are returned instantly with no network traffic.
+//!
+//! Usage:
+//!   download_weights [--repo Zyphra/ZUNA] [--cache-dir ~/.cache/huggingface/hub]
+//!
+//! Both released checkpoints use the same two filenames and are both
+//! supported by this crate — the architecture is detected from the weights:
+//!   Zyphra/ZUNA      — the original release
+//!   Zyphra/ZUNA1.1   — QK-norm + sandwich norm, windows up to 30 s
+//!
+//! Prints two lines to stdout (for shell capture):
+//!   /path/to/model-00001-of-00001.safetensors
+//!   /path/to/config.json
 use anyhow::Result;
 use clap::Parser;
 use hf_hub::api::sync::ApiBuilder;
@@ -20,7 +25,7 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(about = "Download ZUNA weights from HuggingFace (no Python required)")]
 struct Args {
-    /// HuggingFace repo ID.
+    /// HuggingFace repo ID (e.g. `Zyphra/ZUNA` or `Zyphra/ZUNA1.1`).
     #[arg(long, default_value = "Zyphra/ZUNA")]
     repo: String,
 
@@ -30,10 +35,7 @@ struct Args {
     cache_dir: Option<PathBuf>,
 }
 
-const FILES: &[&str] = &[
-    "model-00001-of-00001.safetensors",
-    "config.json",
-];
+const FILES: &[&str] = &["model-00001-of-00001.safetensors", "config.json"];
 
 fn main() -> Result<()> {
     let args = Args::parse();

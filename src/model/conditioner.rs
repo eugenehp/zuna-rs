@@ -1,19 +1,21 @@
-/// Fourier Timestep Conditioner (burn 0.20.1)
-///
-/// Python (`FourierConditioner` in xattn.py):
-///   weight : buffer [output_dim//2, 1]  (frozen random Fourier features)
-///   proj   : Linear(output_dim, output_dim, bias=True)
-///
-///   forward(x):            # x in [0,1] (default min=0, max=1)
-///     f = 2π · x @ weight.T
-///     return proj(cat([cos(f), sin(f)], dim=-1))
-///
-/// The weight buffer is stored in safetensors as `decoder.t_embedder.weight`
-/// with shape [32, 1] (output_dim//2 = 64//2 = 32).
-use burn::prelude::*;
+//! Fourier Timestep Conditioner (burn 0.20.1)
+//!
+//! Python (`FourierConditioner` in xattn.py):
+//! ```text
+//!   weight : buffer [output_dim//2, 1]  (frozen random Fourier features)
+//!   proj   : Linear(output_dim, output_dim, bias=True)
+//!
+//!   forward(x):            # x in [0,1] (default min=0, max=1)
+//!     f = 2π · x @ weight.T
+//!     return proj(cat([cos(f), sin(f)], dim=-1))
+//! ```
+//!
+//! The weight buffer is stored in safetensors as `decoder.t_embedder.weight`
+//! with shape [32, 1] (output_dim//2 = 64//2 = 32).
+use crate::model::linear_zeros;
 use burn::module::{Param, ParamId};
 use burn::nn::Linear;
-use crate::model::linear_zeros;
+use burn::prelude::*;
 
 #[derive(Module, Debug)]
 pub struct FourierConditioner<B: Backend> {
@@ -28,10 +30,7 @@ impl<B: Backend> FourierConditioner<B> {
     pub fn new(output_dim: usize, device: &B::Device) -> Self {
         let half_dim = output_dim / 2;
         Self {
-            weight: Param::initialized(
-                ParamId::new(),
-                Tensor::zeros([half_dim, 1], device),
-            ),
+            weight: Param::initialized(ParamId::new(), Tensor::zeros([half_dim, 1], device)),
             proj: linear_zeros(output_dim, output_dim, true, device),
             half_dim,
         }
@@ -44,9 +43,9 @@ impl<B: Backend> FourierConditioner<B> {
 
         // f = 2π · t @ weight.T  →  [b*s, half_dim]
         let t_flat = t.reshape([b * s, 1]);
-        let w = self.weight.val();                     // [half_dim, 1]
+        let w = self.weight.val(); // [half_dim, 1]
         let f = t_flat
-            .matmul(w.transpose())                     // [b*s, half_dim]
+            .matmul(w.transpose()) // [b*s, half_dim]
             .mul_scalar(2.0_f32 * std::f32::consts::PI)
             .reshape([b, s, self.half_dim]);
 

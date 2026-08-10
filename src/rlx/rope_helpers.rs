@@ -17,7 +17,11 @@ pub fn build_rope_table(
     max_seqlen: usize,
     theta: f64,
 ) -> Vec<f32> {
-    assert_eq!(head_dim % rope_dim, 0, "head_dim must be divisible by rope_dim");
+    assert_eq!(
+        head_dim % rope_dim,
+        0,
+        "head_dim must be divisible by rope_dim"
+    );
     let dim_per_rope = head_dim / rope_dim;
     let half = dim_per_rope / 2;
     let mut table = vec![0f32; max_seqlen * half * 4];
@@ -27,7 +31,7 @@ pub fn build_rope_table(
             let angle = (pos as f64) * freq;
             let (s, c) = (angle as f32).sin_cos();
             let base = (pos * half + h) * 4;
-            table[base]     = c;
+            table[base] = c;
             table[base + 1] = -s;
             table[base + 2] = s;
             table[base + 3] = c;
@@ -63,9 +67,9 @@ pub fn precompute_rope(
             let idx = tok_idx[pos * 4 + axis] as usize;
             for h in 0..half_per_axis {
                 let table_base = (idx * half_per_axis + h) * 4;
-                let c = rope_table[table_base];        // cos
+                let c = rope_table[table_base]; // cos
                 let neg_s = rope_table[table_base + 1]; // -sin
-                let s_val = -neg_s;                     // sin
+                let s_val = -neg_s; // sin
                 let out_dim = axis * half_per_axis + h;
                 cos[pos * half_total + out_dim] = c;
                 sin[pos * half_total + out_dim] = s_val;
@@ -90,7 +94,7 @@ pub fn precompute_rope(
 /// (the only one ZUNA ships) gives `s2 = 2 * s`.
 pub fn preinterleave(
     token_values: &[f32],
-    registers:    &[f32],
+    registers: &[f32],
     b: usize,
     s: usize,
     input_dim: usize,
@@ -106,13 +110,13 @@ pub fn preinterleave(
         for i in 0..s {
             // Slot 0 of the group: register token.
             let reg_off = ((bi * s2) + i * stride) * input_dim;
-            out[reg_off .. reg_off + input_dim].copy_from_slice(registers);
+            out[reg_off..reg_off + input_dim].copy_from_slice(registers);
             // Subsequent slots: the real token (and copies for df > 1).
             for k in 1..stride {
                 let tok_off = ((bi * s2) + i * stride + k) * input_dim;
                 let src_off = ((bi * s) + i) * input_dim;
-                out[tok_off .. tok_off + input_dim]
-                    .copy_from_slice(&token_values[src_off .. src_off + input_dim]);
+                out[tok_off..tok_off + input_dim]
+                    .copy_from_slice(&token_values[src_off..src_off + input_dim]);
             }
         }
     }
@@ -129,7 +133,7 @@ pub fn repeat_token_idx(tok_idx: &[i32], s: usize, downsample_factor: usize) -> 
         for k in 0..stride {
             let dst = (i * stride + k) * 4;
             let src = i * 4;
-            out[dst .. dst + 4].copy_from_slice(&tok_idx[src .. src + 4]);
+            out[dst..dst + 4].copy_from_slice(&tok_idx[src..src + 4]);
         }
     }
     out
@@ -166,5 +170,9 @@ fn next_unit(state: &mut u64) -> f64 {
     *state ^= *state << 17;
     let mant = (*state >> 11) as f64 / ((1u64 << 53) as f64);
     // Avoid exactly 0 so ln() is finite.
-    if mant <= 0.0 { f64::MIN_POSITIVE } else { mant }
+    if mant <= 0.0 {
+        f64::MIN_POSITIVE
+    } else {
+        mant
+    }
 }

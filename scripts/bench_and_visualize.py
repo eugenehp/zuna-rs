@@ -390,6 +390,25 @@ def load_config(config_path: pathlib.Path) -> dict:
         return json.load(f)
 
 
+def canonical_key(key: str) -> str:
+    """
+    Normalise a ZUNA1.1 tensor name to its ZUNA1 spelling.
+
+    ZUNA1.1 wraps every plain RMSNorm in a `torch.nn.RMSNorm` sub-module, so
+    scales move from `…ffn_norm.weight` to `…ffn_norm.norm.weight`. Collapsing
+    that keeps one key namespace for both checkpoints — mirrors
+    `zuna_rs::config::canonical_key` on the Rust side.
+
+    Only collapses when the module the suffix hangs off is itself a norm, so
+    ZUNA1's `encoder.norm.weight` (where `norm` *is* the module) is untouched.
+    """
+    suffix = ".norm.weight"
+    if not key.endswith(suffix):
+        return key
+    head = key[: -len(suffix)]
+    return f"{head}.weight" if "norm" in head.rsplit(".", 1)[-1] else key
+
+
 def load_weights_f32(weights_path: pathlib.Path) -> Dict[str, np.ndarray]:
     """Load safetensors file as float32 numpy arrays (handles bfloat16)."""
     if not HAS_ST:
@@ -399,6 +418,7 @@ def load_weights_f32(weights_path: pathlib.Path) -> Dict[str, np.ndarray]:
     with safe_open(str(weights_path), framework="numpy") as f:
         for key in f.keys():
             k = key[len("model."):] if key.startswith("model.") else key
+            k = canonical_key(k)
             try:
                 arr = f.get_tensor(key)
             except Exception as e:
@@ -449,6 +469,11 @@ class ZunaEncoderNumpy:
       3. 16× TransformerBlock (RMSNorm + Self-Attention(4D-RoPE) + SwiGLU)
       4. Extract register tokens      [1, S, dim]
       5. RMSNorm + output projection  [1, S, 32]
+
+    Both released checkpoints are supported. ZUNA1.1 additionally applies a
+    per-head QK-norm before RoPE and a sandwich norm on each sub-layer output
+    before the residual add; both are detected from the weight names, since
+    config.json records neither.
     """
 
     def __init__(self, weights: Dict[str, np.ndarray], config: dict):
@@ -472,6 +497,18 @@ class ZunaEncoderNumpy:
         else:
             self.n_heads = self.dim // self.head_dim   # fallback: 1024//64 = 16
         self.n_kv_heads = self.n_heads   # ZUNA uses full MHA (no GQA)
+
+        # ZUNA1.1 adds QK-norm and sandwich ("post") norms. Neither is recorded
+        # in config.json — upstream hard-codes `do_QK_norm` / `do_sandwich_norm`
+        # in lingua/transformer.py — so detect them from the weight names.
+        self.qk_norm       = "encoder.layers.0.attention.q_norm.weight" in weights
+        self.sandwich_norm = "encoder.layers.0.attention_norm_post.weight" in weights
+        self.arch = ("ZUNA1.1" if (self.qk_norm and self.sandwich_norm)
+                     else "ZUNA1" if not (self.qk_norm or self.sandwich_norm)
+                     else "ZUNA (custom)")
+        # Upstream builds the QK-norms as RMSNorm(head_dim, eps=1e-5) rather
+        # than threading args.norm_eps through, so this stays a constant.
+        self.qk_norm_eps = 1e-5
 
         # Precompute RoPE table: [max_seqlen, head_dim/(rope_dim*2), 2, 2]
         dim_per_rope  = self.head_dim // self.rope_dim   # 16
@@ -527,14 +564,20 @@ class ZunaEncoderNumpy:
 
     # ── Layer building blocks ─────────────────────────────────────────────────
 
-    def _rms_norm(self, x: np.ndarray, w_key: str) -> np.ndarray:
+    def _rms_norm(self, x: np.ndarray, w_key: str,
+                  eps: Optional[float] = None) -> np.ndarray:
         """RMSNorm along last dim.
         w_key refers to self.w[w_key] which holds the RMSNorm scale vector.
         In the safetensors file: 'encoder.layers.i.attention_norm.weight' etc.
         """
         gamma = self.w[w_key]
-        rms   = np.sqrt(np.mean(x ** 2, axis=-1, keepdims=True) + self.norm_eps)
+        eps   = self.norm_eps if eps is None else eps
+        rms   = np.sqrt(np.mean(x ** 2, axis=-1, keepdims=True) + eps)
         return (x / rms) * gamma
+
+    def _post_norm(self, y: np.ndarray, w_key: str) -> np.ndarray:
+        """ZUNA1.1 sandwich norm on a sub-layer output; identity on ZUNA1."""
+        return self._rms_norm(y, w_key) if self.sandwich_norm else y
 
     def _self_attention(self, x: np.ndarray, layer: int,
                         freqs: np.ndarray) -> np.ndarray:
@@ -551,6 +594,11 @@ class ZunaEncoderNumpy:
         xq = (x @ wq.T).reshape(B, S, H, Dh)
         xk = (x @ wk.T).reshape(B, S, H, Dh)
         xv = (x @ wv.T).reshape(B, S, H, Dh)
+
+        # ZUNA1.1 QK-norm: per-head RMSNorm on the [B,S,H,Dh] view, before RoPE.
+        if self.qk_norm:
+            xq = self._rms_norm(xq, f"{p}.q_norm.weight", self.qk_norm_eps)
+            xk = self._rms_norm(xk, f"{p}.k_norm.weight", self.qk_norm_eps)
 
         xq, xk = self._apply_rope(xq, xk, freqs)
 
@@ -612,13 +660,15 @@ class ZunaEncoderNumpy:
         for i in range(self.n_layers):
             p = f"encoder.layers.{i}"
 
-            # Attention sub-layer
+            # Attention sub-layer:  h = h + post(attn(pre(h)))
             h_n = self._rms_norm(h, f"{p}.attention_norm.weight")
-            h   = h + self._self_attention(h_n, i, freqs_4d)
+            h   = h + self._post_norm(self._self_attention(h_n, i, freqs_4d),
+                                      f"{p}.attention_norm_post.weight")
 
-            # Feed-forward sub-layer
+            # Feed-forward sub-layer:  h = h + post(ffn(pre(h)))
             h_n = self._rms_norm(h, f"{p}.ffn_norm.weight")
-            h   = h + self._swiglu(h_n, i)
+            h   = h + self._post_norm(self._swiglu(h_n, i),
+                                      f"{p}.ffn_norm_post.weight")
 
         # ── 6. Extract register tokens (even positions 0,2,4,…) ──────────────
         hdim = h.shape[-1]

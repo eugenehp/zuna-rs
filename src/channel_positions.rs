@@ -37,12 +37,12 @@ use std::sync::OnceLock;
 
 // ── Embedded source files ─────────────────────────────────────────────────────
 
-const ELC_1020:        &str = include_str!("montages/standard_1020.elc");
-const ELC_1005:        &str = include_str!("montages/standard_1005.elc");
-const ELC_ALPHABETIC:  &str = include_str!("montages/standard_alphabetic.elc");
-const ELC_POSTFIXED:   &str = include_str!("montages/standard_postfixed.elc");
-const ELC_PREFIXED:    &str = include_str!("montages/standard_prefixed.elc");
-const ELC_PRIMED:      &str = include_str!("montages/standard_primed.elc");
+const ELC_1020: &str = include_str!("montages/standard_1020.elc");
+const ELC_1005: &str = include_str!("montages/standard_1005.elc");
+const ELC_ALPHABETIC: &str = include_str!("montages/standard_alphabetic.elc");
+const ELC_POSTFIXED: &str = include_str!("montages/standard_postfixed.elc");
+const ELC_PREFIXED: &str = include_str!("montages/standard_prefixed.elc");
+const ELC_PRIMED: &str = include_str!("montages/standard_primed.elc");
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -77,15 +77,14 @@ impl MontageLayout {
     /// Human-readable name of this layout.
     pub fn name(self) -> &'static str {
         match self {
-            Self::Standard1020       => "standard_1020",
-            Self::Standard1005       => "standard_1005",
+            Self::Standard1020 => "standard_1020",
+            Self::Standard1005 => "standard_1005",
             Self::StandardAlphabetic => "standard_alphabetic",
-            Self::StandardPostfixed  => "standard_postfixed",
-            Self::StandardPrefixed   => "standard_prefixed",
-            Self::StandardPrimed     => "standard_primed",
+            Self::StandardPostfixed => "standard_postfixed",
+            Self::StandardPrefixed => "standard_prefixed",
+            Self::StandardPrimed => "standard_primed",
         }
     }
-
 }
 
 /// Return all channels and their XYZ positions (metres) for a given layout.
@@ -94,20 +93,20 @@ impl MontageLayout {
 /// reference to the cached map.  Fiducials (Nz, LPA, RPA) are included.
 pub fn montage_channels(layout: MontageLayout) -> &'static HashMap<String, [f32; 3]> {
     // One OnceLock per layout variant.
-    static C1020:  OnceLock<HashMap<String,[f32;3]>> = OnceLock::new();
-    static C1005:  OnceLock<HashMap<String,[f32;3]>> = OnceLock::new();
-    static CALPHA: OnceLock<HashMap<String,[f32;3]>> = OnceLock::new();
-    static CPOST:  OnceLock<HashMap<String,[f32;3]>> = OnceLock::new();
-    static CPRE:   OnceLock<HashMap<String,[f32;3]>> = OnceLock::new();
-    static CPRIME: OnceLock<HashMap<String,[f32;3]>> = OnceLock::new();
+    static C1020: OnceLock<HashMap<String, [f32; 3]>> = OnceLock::new();
+    static C1005: OnceLock<HashMap<String, [f32; 3]>> = OnceLock::new();
+    static CALPHA: OnceLock<HashMap<String, [f32; 3]>> = OnceLock::new();
+    static CPOST: OnceLock<HashMap<String, [f32; 3]>> = OnceLock::new();
+    static CPRE: OnceLock<HashMap<String, [f32; 3]>> = OnceLock::new();
+    static CPRIME: OnceLock<HashMap<String, [f32; 3]>> = OnceLock::new();
 
     let (lock, src) = match layout {
-        MontageLayout::Standard1020       => (&C1020,  ELC_1020),
-        MontageLayout::Standard1005       => (&C1005,  ELC_1005),
+        MontageLayout::Standard1020 => (&C1020, ELC_1020),
+        MontageLayout::Standard1005 => (&C1005, ELC_1005),
         MontageLayout::StandardAlphabetic => (&CALPHA, ELC_ALPHABETIC),
-        MontageLayout::StandardPostfixed  => (&CPOST,  ELC_POSTFIXED),
-        MontageLayout::StandardPrefixed   => (&CPRE,   ELC_PREFIXED),
-        MontageLayout::StandardPrimed     => (&CPRIME, ELC_PRIMED),
+        MontageLayout::StandardPostfixed => (&CPOST, ELC_POSTFIXED),
+        MontageLayout::StandardPrefixed => (&CPRE, ELC_PREFIXED),
+        MontageLayout::StandardPrimed => (&CPRIME, ELC_PRIMED),
     };
 
     lock.get_or_init(|| parse_elc(src))
@@ -137,9 +136,10 @@ pub fn channel_xyz(name: &str) -> Option<[f32; 3]> {
 /// measured by Euclidean distance.  Returns `None` if `candidates` is empty.
 pub fn nearest_channel(
     target_xyz: [f32; 3],
-    candidates: &[([f32; 3], usize)],  // (xyz, original_index)
+    candidates: &[([f32; 3], usize)], // (xyz, original_index)
 ) -> Option<usize> {
-    candidates.iter()
+    candidates
+        .iter()
         .min_by(|(a, _), (b, _)| {
             let da = dist2(*a, target_xyz);
             let db = dist2(*b, target_xyz);
@@ -163,7 +163,11 @@ fn parse_elc(src: &str) -> HashMap<String, [f32; 3]> {
         let mut s = 1e-3_f32; // default mm
         for line in src.lines() {
             if line.contains("UnitPosition") {
-                s = if line.contains('m') && !line.contains("mm") { 1.0 } else { 1e-3 };
+                s = if line.contains('m') && !line.contains("mm") {
+                    1.0
+                } else {
+                    1e-3
+                };
                 break;
             }
         }
@@ -178,16 +182,30 @@ fn parse_elc(src: &str) -> HashMap<String, [f32; 3]> {
 
     for line in src.lines() {
         let t = line.trim();
-        if t == "Positions" || t.starts_with("Positions") { in_pos = true; in_lbl = false; continue; }
-        if t == "Labels"    || t.starts_with("Labels")    { in_lbl = true; in_pos = false; continue; }
+        if t == "Positions" || t.starts_with("Positions") {
+            in_pos = true;
+            in_lbl = false;
+            continue;
+        }
+        if t == "Labels" || t.starts_with("Labels") {
+            in_lbl = true;
+            in_pos = false;
+            continue;
+        }
 
         if in_pos {
             // Handle both "old" format (`x y z`) and "new" format (`E01 : x y z`)
             let nums: Vec<f32> = if t.contains(':') {
-                t.split(':').nth(1).unwrap_or("").split_whitespace()
-                    .filter_map(|s| s.parse().ok()).collect()
+                t.split(':')
+                    .nth(1)
+                    .unwrap_or("")
+                    .split_whitespace()
+                    .filter_map(|s| s.parse().ok())
+                    .collect()
             } else {
-                t.split_whitespace().filter_map(|s| s.parse().ok()).collect()
+                t.split_whitespace()
+                    .filter_map(|s| s.parse().ok())
+                    .collect()
             };
             if nums.len() == 3 {
                 raw.push([nums[0], nums[1], nums[2]]);
@@ -197,24 +215,35 @@ fn parse_elc(src: &str) -> HashMap<String, [f32; 3]> {
         }
     }
 
-    assert_eq!(raw.len(), labels.len(),
-        "ELC parse mismatch: {} positions vs {} labels", raw.len(), labels.len());
+    assert_eq!(
+        raw.len(),
+        labels.len(),
+        "ELC parse mismatch: {} positions vs {} labels",
+        raw.len(),
+        labels.len()
+    );
 
     // Convert to metres
-    let mut pos_m: Vec<[f32; 3]> = raw.iter()
+    let mut pos_m: Vec<[f32; 3]> = raw
+        .iter()
         .map(|p| [p[0] * mm_scale, p[1] * mm_scale, p[2] * mm_scale])
         .collect();
 
     // Scale so median norm == HEAD_SIZE (same as MNE's head_size parameter)
-    let mut norms: Vec<f32> = pos_m.iter()
-        .map(|p| (p[0]*p[0] + p[1]*p[1] + p[2]*p[2]).sqrt())
+    let mut norms: Vec<f32> = pos_m
+        .iter()
+        .map(|p| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt())
         .filter(|&n| n > 1e-6)
         .collect();
     norms.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let median = norms[norms.len() / 2];
     if median > 1e-6 {
         let scale = HEAD_SIZE / median;
-        for p in &mut pos_m { p[0] *= scale; p[1] *= scale; p[2] *= scale; }
+        for p in &mut pos_m {
+            p[0] *= scale;
+            p[1] *= scale;
+            p[2] *= scale;
+        }
     }
 
     labels.into_iter().zip(pos_m).collect()
@@ -232,8 +261,10 @@ pub fn normalise(name: &str) -> String {
 }
 
 fn dist2(a: [f32; 3], b: [f32; 3]) -> f32 {
-    let dx = a[0]-b[0]; let dy = a[1]-b[1]; let dz = a[2]-b[2];
-    dx*dx + dy*dy + dz*dz
+    let dx = a[0] - b[0];
+    let dy = a[1] - b[1];
+    let dz = a[2] - b[2];
+    dx * dx + dy * dy + dz * dz
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -253,8 +284,10 @@ mod tests {
 
     #[test]
     fn known_channels_present() {
-        for name in &["Cz", "Fz", "Pz", "C3", "C4", "Fp1", "Fp2", "O1", "O2",
-                      "T7", "T8", "TP9", "TP10", "AF7", "AF8"] {
+        for name in &[
+            "Cz", "Fz", "Pz", "C3", "C4", "Fp1", "Fp2", "O1", "O2", "T7", "T8", "TP9", "TP10",
+            "AF7", "AF8",
+        ] {
             let xyz = channel_xyz(name);
             assert!(xyz.is_some(), "channel '{name}' not found");
             let [x, y, z] = xyz.unwrap();
@@ -291,13 +324,19 @@ mod tests {
 
         // A query point right on top of C3 must return C3.
         let at_c3 = c3;
-        assert_eq!(nearest_channel(at_c3, &candidates).unwrap(), 1,
-            "query at C3 should return C3 (idx=1)");
+        assert_eq!(
+            nearest_channel(at_c3, &candidates).unwrap(),
+            1,
+            "query at C3 should return C3 (idx=1)"
+        );
 
         // A query point right on top of C4 must return C4.
         let at_c4 = c4;
-        assert_eq!(nearest_channel(at_c4, &candidates).unwrap(), 2,
-            "query at C4 should return C4 (idx=2)");
+        assert_eq!(
+            nearest_channel(at_c4, &candidates).unwrap(),
+            2,
+            "query at C4 should return C4 (idx=2)"
+        );
 
         // A query point just left of midpoint between Cz and C3 should be
         // closer to C3 than to Cz/C4.
@@ -306,8 +345,11 @@ mod tests {
             c3[1] * 0.8 + cz[1] * 0.2,
             c3[2] * 0.8 + cz[2] * 0.2,
         ];
-        assert_eq!(nearest_channel(near_c3, &candidates).unwrap(), 1,
-            "80% toward C3 from Cz should return C3");
+        assert_eq!(
+            nearest_channel(near_c3, &candidates).unwrap(),
+            1,
+            "80% toward C3 from Cz should return C3"
+        );
     }
 
     #[test]

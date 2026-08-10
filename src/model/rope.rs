@@ -1,17 +1,19 @@
-/// 4-D Axial Rotary Position Embedding (burn 0.20.1)
-///
-/// Mirrors `precompute_freqs_cis` + `apply_rotary_emb` from lingua/transformer.py,
-/// extended to the 4-D case in transformer.py `Attention.forward` (rope_dim == 4).
-///
-/// Pretrained ZUNA hyperparameters:
-///   rope_dim   = 4        (axes: x, y, z, t_coarse)
-///   head_dim   = 64
-///   max_seqlen = 50
-///   rope_theta = 10_000.0
-///
-/// freqs_cis table shape: [max_seqlen, 8, 2, 2]
-///   8  = (head_dim / rope_dim) / 2  = (64/4)/2
-///   last two dims = 2×2 rotation matrix [[cos,-sin],[sin,cos]]
+//! 4-D Axial Rotary Position Embedding (burn 0.20.1)
+//!
+//! Mirrors `precompute_freqs_cis` + `apply_rotary_emb` from lingua/transformer.py,
+//! extended to the 4-D case in transformer.py `Attention.forward` (rope_dim == 4).
+//!
+//! Pretrained ZUNA hyperparameters:
+//! ```text
+//!   rope_dim   = 4        (axes: x, y, z, t_coarse)
+//!   head_dim   = 64
+//!   max_seqlen = 50
+//!   rope_theta = 10_000.0
+//!
+//! freqs_cis table shape: [max_seqlen, 8, 2, 2]
+//!   8  = (head_dim / rope_dim) / 2  = (64/4)/2
+//!   last two dims = 2×2 rotation matrix [[cos,-sin],[sin,cos]]
+//! ```
 
 use burn::prelude::*;
 
@@ -41,7 +43,7 @@ impl<B: Backend> RotaryEmbedding<B> {
     ) -> Self {
         assert_eq!(head_dim % rope_dim, 0);
         let dim_per_rope = head_dim / rope_dim; // 16
-        let half = dim_per_rope / 2;            // 8
+        let half = dim_per_rope / 2; // 8
 
         // Build flat [max_seqlen * half * 4] rotation-matrix data.
         // Layout: [pos, h, row, col]  (row-major)
@@ -52,20 +54,23 @@ impl<B: Backend> RotaryEmbedding<B> {
                 let angle = pos as f32 * freq;
                 let (s, c) = angle.sin_cos();
                 let base = (pos * half + h) * 4;
-                table[base]     =  c;  // [0,0]
-                table[base + 1] = -s;  // [0,1]
-                table[base + 2] =  s;  // [1,0]
-                table[base + 3] =  c;  // [1,1]
+                table[base] = c; // [0,0]
+                table[base + 1] = -s; // [0,1]
+                table[base + 2] = s; // [1,0]
+                table[base + 3] = c; // [1,1]
             }
         }
 
-        let freqs_cis = Tensor::<B, 1>::from_data(
-            TensorData::new(table, vec![max_seqlen * half * 4]),
-            device,
-        )
-        .reshape([max_seqlen, half, 2, 2]);
+        let freqs_cis =
+            Tensor::<B, 1>::from_data(TensorData::new(table, vec![max_seqlen * half * 4]), device)
+                .reshape([max_seqlen, half, 2, 2]);
 
-        Self { freqs_cis, max_seqlen, rope_dim, head_dim }
+        Self {
+            freqs_cis,
+            max_seqlen,
+            rope_dim,
+            head_dim,
+        }
     }
 
     /// Gather rotation matrices for one RoPE axis.
@@ -78,22 +83,24 @@ impl<B: Backend> RotaryEmbedding<B> {
     /// Build the combined 4-D freq tensor for a batch of tokens.
     ///
     /// Python (rope_dim==4):
+    /// ```text
     ///   parts = [freq_cis[tok_idx[:,i]] for i in range(4)]
     ///   freqcis_4RoPE = cat(parts, dim=1)   # [S, head_dim/2, 2, 2]
+    /// ```
     ///
     /// tok_idx: [S, 4]  — one column per RoPE axis
     /// Returns: [S, head_dim/2, 2, 2]   (= [S, 32, 2, 2] for head_dim=64)
     pub fn build_freqs_4d(&self, tok_idx: Tensor<B, 2, Int>) -> Tensor<B, 4> {
-        let s    = tok_idx.dims()[0];
+        let s = tok_idx.dims()[0];
         let _half = self.freqs_cis.dims()[1]; // 8
 
         let parts: Vec<Tensor<B, 4>> = (0..self.rope_dim)
             .map(|axis| {
                 let col = tok_idx
                     .clone()
-                    .narrow(1, axis, 1)   // [S, 1]
-                    .reshape([s]);        // [S]
-                self.gather_axis(col)     // [S, half, 2, 2]
+                    .narrow(1, axis, 1) // [S, 1]
+                    .reshape([s]); // [S]
+                self.gather_axis(col) // [S, half, 2, 2]
             })
             .collect();
 
@@ -125,12 +132,12 @@ pub fn apply_rope<B: Backend>(
     // Both shape [S, D/2], broadcast to [1, S, 1, D/2]
     let cos = freqs
         .clone()
-        .narrow(2, 0, 1)  // [S, D/2, 1, 2]
-        .narrow(3, 0, 1)  // [S, D/2, 1, 1]
+        .narrow(2, 0, 1) // [S, D/2, 1, 2]
+        .narrow(3, 0, 1) // [S, D/2, 1, 1]
         .reshape([1, s, 1, half]);
     let sin = freqs
-        .narrow(2, 1, 1)  // [S, D/2, 1, 2]  (row 1 = [sin, cos])
-        .narrow(3, 0, 1)  // sin column
+        .narrow(2, 1, 1) // [S, D/2, 1, 2]  (row 1 = [sin, cos])
+        .narrow(3, 0, 1) // sin column
         .reshape([1, s, 1, half]);
 
     (
@@ -141,24 +148,23 @@ pub fn apply_rope<B: Backend>(
 
 /// Apply rotation to a single [B, S, H, D] tensor.
 fn rotate_half<B: Backend>(
-    x:    Tensor<B, 4>,  // [B, S, H, D]
-    cos:  Tensor<B, 4>,  // [1, S, 1, D/2]  (broadcasts over B and H)
-    sin:  Tensor<B, 4>,  // [1, S, 1, D/2]
-    b:    usize,
-    s:    usize,
-    h:    usize,
+    x: Tensor<B, 4>,   // [B, S, H, D]
+    cos: Tensor<B, 4>, // [1, S, 1, D/2]  (broadcasts over B and H)
+    sin: Tensor<B, 4>, // [1, S, 1, D/2]
+    b: usize,
+    s: usize,
+    h: usize,
     half: usize,
 ) -> Tensor<B, 4> {
     // Reshape to [B, S, H, D/2, 2] then split even/odd
     let pairs = x.reshape([b, s, h, half, 2]);
     let even = pairs.clone().narrow(4, 0, 1).reshape([b, s, h, half]);
-    let odd  = pairs.narrow(4, 1, 1).reshape([b, s, h, half]);
+    let odd = pairs.narrow(4, 1, 1).reshape([b, s, h, half]);
 
     let out_even = even.clone() * cos.clone() - odd.clone() * sin.clone();
-    let out_odd  = even * sin + odd * cos;
+    let out_odd = even * sin + odd * cos;
 
     // Interleave: stack [B,S,H,half] × 2 along new dim 4
     //   → [B, S, H, half, 2] → reshape → [B, S, H, D]
-    Tensor::stack::<5>(vec![out_even, out_odd], 4)
-        .reshape([b, s, h, half * 2])
+    Tensor::stack::<5>(vec![out_even, out_odd], 4).reshape([b, s, h, half * 2])
 }

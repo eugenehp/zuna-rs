@@ -1,13 +1,14 @@
-/// Cross-Attention with 4-D axial RoPE (burn 0.20.1)
-///
-/// Python: `CrossAttention` in xattn.py.
-/// Q comes from the decoder state, K/V from the encoder output.
-/// Each side is rotated with its own freqs tensor.
-use burn::prelude::*;
-use burn::nn::Linear;
-use burn::tensor::activation::softmax;
+//! Cross-Attention with 4-D axial RoPE (burn 0.20.1)
+//!
+//! Python: `CrossAttention` in xattn.py.
+//! Q comes from the decoder state, K/V from the encoder output.
+//! Each side is rotated with its own freqs tensor.
+use crate::model::norm::RMSNorm;
 use crate::model::rope::apply_rope;
-use crate::model::linear_zeros;
+use crate::model::{linear_zeros, QK_NORM_EPS};
+use burn::nn::Linear;
+use burn::prelude::*;
+use burn::tensor::activation::softmax;
 
 #[derive(Module, Debug)]
 pub struct CrossAttention<B: Backend> {
@@ -15,9 +16,13 @@ pub struct CrossAttention<B: Backend> {
     pub wk: Linear<B>,
     pub wv: Linear<B>,
     pub wo: Linear<B>,
-    pub n_heads:    usize,
+    /// ZUNA1.1 QK-norm: per-head RMSNorm on Q, applied before RoPE.
+    pub q_norm: Option<RMSNorm<B>>,
+    /// ZUNA1.1 QK-norm: per-head RMSNorm on K, applied before RoPE.
+    pub k_norm: Option<RMSNorm<B>>,
+    pub n_heads: usize,
     pub n_kv_heads: usize,
-    pub head_dim:   usize,
+    pub head_dim: usize,
 }
 
 impl<B: Backend> CrossAttention<B> {
@@ -26,15 +31,21 @@ impl<B: Backend> CrossAttention<B> {
         head_dim: usize,
         n_heads: usize,
         n_kv_heads: usize,
+        qk_norm: bool,
         device: &B::Device,
     ) -> Self {
         let z = |i, o| linear_zeros(i, o, false, device);
+        let qk = || qk_norm.then(|| RMSNorm::new(head_dim, QK_NORM_EPS, device));
         Self {
-            wq: z(dim, n_heads    * head_dim),
+            wq: z(dim, n_heads * head_dim),
             wk: z(dim, n_kv_heads * head_dim),
             wv: z(dim, n_kv_heads * head_dim),
             wo: z(n_heads * head_dim, dim),
-            n_heads, n_kv_heads, head_dim,
+            q_norm: qk(),
+            k_norm: qk(),
+            n_heads,
+            n_kv_heads,
+            head_dim,
         }
     }
 
@@ -45,35 +56,37 @@ impl<B: Backend> CrossAttention<B> {
     /// Returns:  [1, S_q, dim]
     pub fn forward(
         &self,
-        xq:      Tensor<B, 3>,
-        xkv:     Tensor<B, 3>,
-        freqs_q:  Tensor<B, 4>,
+        xq: Tensor<B, 3>,
+        xkv: Tensor<B, 3>,
+        freqs_q: Tensor<B, 4>,
         freqs_kv: Tensor<B, 4>,
     ) -> Tensor<B, 3> {
-        let [b, s_q, _]  = xq.dims();
+        let [b, s_q, _] = xq.dims();
         let [_, s_kv, _] = xkv.dims();
         let (h, dh) = (self.n_heads, self.head_dim);
-        let device  = xq.device();
+        let device = xq.device();
 
-        let q = self.wq.forward(xq).reshape([b, s_q,  h, dh]);
+        let q = self.wq.forward(xq).reshape([b, s_q, h, dh]);
         let k = self.wk.forward(xkv.clone()).reshape([b, s_kv, h, dh]);
         let v = self.wv.forward(xkv).reshape([b, s_kv, h, dh]);
 
-        // Rotate Q with freqs_q: use a zero dummy tensor for the K partner.
-        let (q_rot, _) = apply_rope(
-            q,
-            Tensor::zeros([b, s_q, h, dh], &device),
-            freqs_q,
-        );
-        // Rotate K with freqs_kv: use a zero dummy tensor for the Q partner.
-        let (_, k_rot) = apply_rope(
-            Tensor::zeros([b, s_kv, h, dh], &device),
-            k,
-            freqs_kv,
-        );
+        // QK-norm (ZUNA1.1) runs on the [B,S,H,Dh] view, before RoPE.
+        let q = match &self.q_norm {
+            Some(n) => n.forward(q),
+            None => q,
+        };
+        let k = match &self.k_norm {
+            Some(n) => n.forward(k),
+            None => k,
+        };
 
-        let q_t = q_rot.swap_dims(1, 2);  // [1, H, S_q,  Dh]
-        let k_t = k_rot.swap_dims(1, 2);  // [1, H, S_kv, Dh]
+        // Rotate Q with freqs_q: use a zero dummy tensor for the K partner.
+        let (q_rot, _) = apply_rope(q, Tensor::zeros([b, s_q, h, dh], &device), freqs_q);
+        // Rotate K with freqs_kv: use a zero dummy tensor for the Q partner.
+        let (_, k_rot) = apply_rope(Tensor::zeros([b, s_kv, h, dh], &device), k, freqs_kv);
+
+        let q_t = q_rot.swap_dims(1, 2); // [1, H, S_q,  Dh]
+        let k_t = k_rot.swap_dims(1, 2); // [1, H, S_kv, Dh]
         let v_t = v.swap_dims(1, 2);
 
         let scale = (dh as f64).powf(-0.5) as f32;
@@ -82,6 +95,7 @@ impl<B: Backend> CrossAttention<B> {
         // [1,H,S_q,S_kv] × [1,H,S_kv,Dh] → [1,H,S_q,Dh]
         let out = attn.matmul(v_t);
 
-        self.wo.forward(out.swap_dims(1, 2).reshape([b, s_q, h * dh]))
+        self.wo
+            .forward(out.swap_dims(1, 2).reshape([b, s_q, h * dh]))
     }
 }

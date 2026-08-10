@@ -31,7 +31,7 @@ use anyhow::Context;
 use burn::{prelude::*, tensor::Distribution};
 
 use crate::{
-    config::{DataConfig, ModelConfig},
+    config::{DataConfig, ModelArch, ModelConfig},
     data::invert_reshape_tensor as invert_reshape,
     encoder::{EncodingResult, EpochEmbedding},
     inference::{EpochOutput, InferenceResult},
@@ -49,15 +49,17 @@ use crate::{
 /// Load with [`ZunaDecoder::load`] (decoder weights only — saves ~50 % memory
 /// vs the full [`crate::ZunaInference`]).
 pub struct ZunaDecoder<B: Backend> {
-    decoder:       DecoderTransformer<B>,
-    rope:          RotaryEmbedding<B>,
+    decoder: DecoderTransformer<B>,
+    rope: RotaryEmbedding<B>,
     /// Architecture hyperparameters (from config.json).
     pub model_cfg: ModelConfig,
+    /// Checkpoint architecture, detected from the weight names.
+    pub arch: ModelArch,
     /// Preprocessing / tokenisation parameters.
-    pub data_cfg:  DataConfig,
+    pub data_cfg: DataConfig,
     /// Diffusion noise standard deviation (σ).
     pub global_sigma: f32,
-    device:        B::Device,
+    device: B::Device,
 }
 
 impl<B: Backend> ZunaDecoder<B> {
@@ -69,34 +71,53 @@ impl<B: Backend> ZunaDecoder<B> {
     ///
     /// Returns `(decoder, weight_load_ms)`.
     pub fn load(
-        config_path:  &Path,
+        config_path: &Path,
         weights_path: &Path,
-        device:       B::Device,
+        device: B::Device,
     ) -> anyhow::Result<(Self, f64)> {
         let cfg_str = std::fs::read_to_string(config_path)
             .with_context(|| format!("config: {}", config_path.display()))?;
         let hf_val: serde_json::Value = serde_json::from_str(&cfg_str)?;
-        let model_cfg: ModelConfig = serde_json::from_value(hf_val["model"].clone())
-            .context("parsing model config")?;
+        let model_cfg: ModelConfig =
+            serde_json::from_value(hf_val["model"].clone()).context("parsing model config")?;
+        model_cfg
+            .validate()
+            .with_context(|| format!("unsupported config: {}", config_path.display()))?;
 
         let rope = RotaryEmbedding::<B>::new(
-            model_cfg.head_dim, model_cfg.rope_dim,
-            model_cfg.max_seqlen, model_cfg.rope_theta, &device,
+            model_cfg.head_dim,
+            model_cfg.rope_dim,
+            model_cfg.max_seqlen,
+            model_cfg.rope_theta,
+            &device,
         );
 
         let t = Instant::now();
-        let (decoder, n_heads) = load_decoder_weights::<B>(
+        let (decoder, n_heads, arch) = load_decoder_weights::<B>(
             &model_cfg,
-            weights_path.to_str().context("weights path not valid UTF-8")?,
+            weights_path
+                .to_str()
+                .context("weights path not valid UTF-8")?,
             &device,
         )?;
         let ms = t.elapsed().as_secs_f64() * 1000.0;
 
-        println!("Detected n_heads = {n_heads}");
+        println!("Detected {} — n_heads = {n_heads}", arch.label());
 
         let global_sigma = model_cfg.stft_global_sigma as f32;
 
-        Ok((Self { decoder, rope, model_cfg, data_cfg: DataConfig::default(), global_sigma, device }, ms))
+        Ok((
+            Self {
+                decoder,
+                rope,
+                model_cfg,
+                arch,
+                data_cfg: DataConfig::default(),
+                global_sigma,
+                device,
+            },
+            ms,
+        ))
     }
 
     // ── Accessors ─────────────────────────────────────────────────────────────
@@ -105,8 +126,13 @@ impl<B: Backend> ZunaDecoder<B> {
     pub fn describe(&self) -> String {
         let c = &self.model_cfg;
         format!(
-            "ZUNA decoder  dim={}  layers={}  head_dim={}  t_dim={}  σ={}",
-            c.dim, c.n_layers, c.head_dim, c.t_dim, self.global_sigma,
+            "{} decoder  dim={}  layers={}  head_dim={}  t_dim={}  σ={}",
+            self.arch.label(),
+            c.dim,
+            c.n_layers,
+            c.head_dim,
+            c.t_dim,
+            self.global_sigma,
         )
     }
 
@@ -116,23 +142,24 @@ impl<B: Backend> ZunaDecoder<B> {
     ///
     /// This is the pure decode path — no FIF loading or preprocessing happens
     /// here.  The [`EncodingResult`] must have been produced by
-    /// [`ZunaEncoder::encode_fif`] or [`ZunaEncoder::encode_batch`].
+    /// [`ZunaEncoder::encode_fif`](crate::encoder::ZunaEncoder::encode_fif) or [`ZunaEncoder::encode_batch`](crate::encoder::ZunaEncoder::encode_batch).
     ///
     /// # Arguments
     /// - `embeddings`  — pre-computed encoder latents
     /// - `steps`       — diffusion denoising steps (50 = full quality, 10 = fast)
     /// - `cfg`         — classifier-free guidance scale (1.0 = disabled)
     /// - `data_norm`   — divisor used during preprocessing; multiplied back into
-    ///                   the output to restore the original signal scale
+    ///   the output to restore the original signal scale
     pub fn decode_embeddings(
         &self,
         embeddings: &EncodingResult,
-        steps:      usize,
-        cfg:        f32,
-        data_norm:  f32,
+        steps: usize,
+        cfg: f32,
+        data_norm: f32,
     ) -> anyhow::Result<InferenceResult> {
         let t_dec = Instant::now();
-        let epochs = embeddings.epochs
+        let epochs = embeddings
+            .epochs
             .iter()
             .map(|ep| self.decode_one(ep, steps, cfg, data_norm))
             .collect::<anyhow::Result<Vec<_>>>()?;
@@ -140,7 +167,7 @@ impl<B: Backend> ZunaDecoder<B> {
 
         Ok(InferenceResult {
             epochs,
-            fif_info:   None,
+            fif_info: None,
             ms_preproc: 0.0,
             ms_infer,
         })
@@ -152,10 +179,10 @@ impl<B: Backend> ZunaDecoder<B> {
     /// `[1, S, input_dim]` **before** inversion of the chop-and-reshape.
     pub fn decode_tensor(
         &self,
-        enc_out:   Tensor<B, 3>,
-        tok_idx:   Tensor<B, 2, Int>,
-        steps:     usize,
-        cfg:       f32,
+        enc_out: Tensor<B, 3>,
+        tok_idx: Tensor<B, 2, Int>,
+        steps: usize,
+        cfg: f32,
     ) -> Tensor<B, 3> {
         let device = enc_out.device();
         let [b, s, d] = enc_out.dims();
@@ -163,27 +190,27 @@ impl<B: Backend> ZunaDecoder<B> {
 
         // Initial noise z ~ N(0, σ²)
         let sigma = self.global_sigma as f64;
-        let mut z = Tensor::<B, 3>::random(
-            [b, s, d],
-            Distribution::Normal(0.0, sigma),
-            &device,
-        );
+        let mut z = Tensor::<B, 3>::random([b, s, d], Distribution::Normal(0.0, sigma), &device);
 
         // Rectified-flow Euler sampling loop
         for i in (1..=steps).rev() {
-            let t_val  = dt * i as f32;
+            let t_val = dt * i as f32;
             let time_t = Tensor::<B, 3>::full([b, 1, 1], t_val, &device);
 
             let vc = self.decoder.forward(
-                z.clone(), enc_out.clone(), time_t.clone(), tok_idx.clone(), &self.rope,
+                z.clone(),
+                enc_out.clone(),
+                time_t.clone(),
+                tok_idx.clone(),
+                &self.rope,
             );
 
             let vc = if (cfg - 1.0).abs() > 1e-4 {
                 // Classifier-free guidance: run unconditioned pass with zeros
-                let enc_zeros  = Tensor::zeros([b, s, d], &device);
-                let vc_uncond  = self.decoder.forward(
-                    z.clone(), enc_zeros, time_t, tok_idx.clone(), &self.rope,
-                );
+                let enc_zeros = Tensor::zeros([b, s, d], &device);
+                let vc_uncond =
+                    self.decoder
+                        .forward(z.clone(), enc_zeros, time_t, tok_idx.clone(), &self.rope);
                 vc_uncond.clone() + (vc - vc_uncond).mul_scalar(cfg)
             } else {
                 vc
@@ -199,20 +226,20 @@ impl<B: Backend> ZunaDecoder<B> {
 
     fn decode_one(
         &self,
-        ep:        &EpochEmbedding,
-        steps:     usize,
-        cfg:       f32,
+        ep: &EpochEmbedding,
+        steps: usize,
+        cfg: f32,
         data_norm: f32,
     ) -> anyhow::Result<EpochOutput> {
         let n_tokens = ep.n_tokens();
-        let dc       = &self.data_cfg;
+        let dc = &self.data_cfg;
 
         // Reconstruct enc_out [1, S, output_dim] from stored Vec<f32>.
         let enc_out = Tensor::<B, 2>::from_data(
             TensorData::new(ep.embeddings.clone(), ep.shape.clone()),
             &self.device,
         )
-        .unsqueeze_dim::<3>(0);  // [1, S, output_dim]
+        .unsqueeze_dim::<3>(0); // [1, S, output_dim]
 
         // Reconstruct tok_idx [S, 4] from stored Vec<i64>.
         let tok_idx = Tensor::<B, 2, Int>::from_data(
@@ -233,13 +260,19 @@ impl<B: Backend> ZunaDecoder<B> {
         );
         let recon = recon.mul_scalar(data_norm);
 
-        let shape         = recon.dims().to_vec();
+        let shape = recon.dims().to_vec();
         let reconstructed = recon
             .into_data()
-            .convert::<f32>().to_vec::<f32>()
+            .convert::<f32>()
+            .to_vec::<f32>()
             .map_err(|e| anyhow::anyhow!("recon→vec: {e:?}"))?;
         let chan_pos = ep.chan_pos.clone();
 
-        Ok(EpochOutput { reconstructed, shape, chan_pos, n_channels: ep.n_channels })
+        Ok(EpochOutput {
+            reconstructed,
+            shape,
+            chan_pos,
+            n_channels: ep.n_channels,
+        })
     }
 }

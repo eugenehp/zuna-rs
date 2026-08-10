@@ -18,7 +18,7 @@
 //! whereas the original Burn implementation uses the **interleaved
 //! (even/odd pair)** formulation. To keep numeric parity we re-implement
 //! `rotate_half` here with element-wise ops; the `cos`/`sin` tables are
-//! precomputed on the CPU from `tok_idx` (see [`super::data`]).
+//! precomputed on the CPU from `tok_idx` (see [`super::rope_helpers`]).
 //!
 //! ## Register interleave
 //!
@@ -32,6 +32,8 @@ use rlx::ir::GraphExt;
 use rlx::ops::Activation;
 use rlx::prelude::*;
 
+use crate::config::ModelArch;
+
 // ── Param key registry ───────────────────────────────────────────────────────
 //
 // Auxiliary parameters introduced by the RLX graph that are NOT present in
@@ -40,12 +42,22 @@ use rlx::prelude::*;
 
 /// Per-graph "ones" vector of length `dim`, used as the `gamma` of every
 /// RMSNorm-as-AdaRMSNorm reduction.
-pub const KEY_ONES_DIM:  &str = "__zuna.ones_dim";
+pub const KEY_ONES_DIM: &str = "__zuna.ones_dim";
 /// Per-graph "zeros" vector of length `dim`, used as the `beta` of every
 /// RMSNorm-as-AdaRMSNorm reduction.
 pub const KEY_ZEROS_DIM: &str = "__zuna.zeros_dim";
+/// Per-graph "zeros" vector of length `head_dim`, used as the `beta` of the
+/// ZUNA1.1 QK-norms (RLX's `rms_norm` always takes a beta; PyTorch's has none).
+pub const KEY_ZEROS_HEAD: &str = "__zuna.zeros_head_dim";
 /// Single-element `[2π]` constant used by the Fourier conditioner.
-pub const KEY_TWO_PI:    &str = "__zuna.two_pi";
+pub const KEY_TWO_PI: &str = "__zuna.two_pi";
+
+/// Epsilon of the ZUNA1.1 QK-norms.
+///
+/// Upstream hard-codes `RMSNorm(head_dim, eps=1e-5)` in `Attention.__init__`
+/// / `CrossAttention.__init__` rather than threading `args.norm_eps` through,
+/// so this stays a constant even if `config.json` sets a different `norm_eps`.
+const QK_NORM_EPS: f32 = 1e-5;
 
 // ── Shape specs ──────────────────────────────────────────────────────────────
 
@@ -68,6 +80,8 @@ pub struct EncoderSpec {
     pub hidden_dim: usize,
     pub downsample_factor: usize,
     pub norm_eps: f32,
+    /// Checkpoint-dependent extra norms (see [`ModelArch`]).
+    pub arch: ModelArch,
 }
 
 /// Architecture parameters required to build the decoder graph for one
@@ -85,16 +99,61 @@ pub struct DecoderSpec {
     pub n_heads: usize,
     pub hidden_dim: usize,
     pub norm_eps: f32,
+    /// Checkpoint-dependent extra norms (see [`ModelArch`]).
+    pub arch: ModelArch,
 }
 
 // ── Shape helpers ────────────────────────────────────────────────────────────
 
-fn s1(d: usize)                             -> Shape { Shape::new(&[d],             DType::F32) }
-fn s2_(a: usize, b: usize)                  -> Shape { Shape::new(&[a, b],          DType::F32) }
-fn s3(a: usize, b: usize, c: usize)         -> Shape { Shape::new(&[a, b, c],       DType::F32) }
-fn s4(a: usize, b: usize, c: usize, d: usize) -> Shape { Shape::new(&[a, b, c, d], DType::F32) }
+fn s1(d: usize) -> Shape {
+    Shape::new(&[d], DType::F32)
+}
+fn s2_(a: usize, b: usize) -> Shape {
+    Shape::new(&[a, b], DType::F32)
+}
+fn s3(a: usize, b: usize, c: usize) -> Shape {
+    Shape::new(&[a, b, c], DType::F32)
+}
+fn s4(a: usize, b: usize, c: usize, d: usize) -> Shape {
+    Shape::new(&[a, b, c, d], DType::F32)
+}
 
 // ── Building blocks ──────────────────────────────────────────────────────────
+
+/// Shape of an attention tensor viewed as `[B, S, H, D]`.
+#[derive(Clone, Copy, Debug)]
+struct HeadShape {
+    /// Batch.
+    b: usize,
+    /// Sequence length.
+    s: usize,
+    /// Head count.
+    h: usize,
+    /// Per-head width.
+    d: usize,
+}
+
+impl HeadShape {
+    fn dims4(&self) -> Vec<i64> {
+        vec![self.b as i64, self.s as i64, self.h as i64, self.d as i64]
+    }
+}
+
+/// The precomputed per-position RoPE tables, as graph inputs.
+#[derive(Clone, Copy, Debug)]
+struct RopeTables {
+    cos: NodeId,
+    sin: NodeId,
+}
+
+/// The four projection matrices of one attention module.
+#[derive(Clone, Copy, Debug)]
+struct AttnWeights {
+    wq: NodeId,
+    wk: NodeId,
+    wv: NodeId,
+    wo: NodeId,
+}
 
 /// Interleaved-pair RoPE applied to a `[B, S, H, D]` tensor.
 ///
@@ -106,40 +165,49 @@ fn s4(a: usize, b: usize, c: usize, d: usize) -> Shape { Shape::new(&[a, b, c, d
 /// ```
 /// with pairs formed by splitting the last axis into `(D/2, 2)` and
 /// re-interleaving afterwards.
-fn rotate_half(
-    g: &mut Graph,
-    x: NodeId,
-    cos: NodeId,
-    sin: NodeId,
-    b: usize,
-    s: usize,
-    h: usize,
-    d: usize,
-) -> NodeId {
+fn rotate_half(g: &mut Graph, x: NodeId, rope: RopeTables, shape: HeadShape) -> NodeId {
+    let HeadShape { b, s, h, d } = shape;
+    let (cos, sin) = (rope.cos, rope.sin);
     let half = d / 2;
     // x [B,S,H,D] → [B,S,H,half,2]
     let pairs = g.reshape_(x, vec![b as i64, s as i64, h as i64, half as i64, 2]);
 
     // narrow axis 4: even = idx 0, odd = idx 1 — each [B,S,H,half,1]
     let even5 = g.narrow_(pairs, 4, 0, 1);
-    let odd5  = g.narrow_(pairs, 4, 1, 1);
+    let odd5 = g.narrow_(pairs, 4, 1, 1);
     // squeeze trailing 1 → [B,S,H,half]
-    let even  = g.reshape_(even5, vec![b as i64, s as i64, h as i64, half as i64]);
-    let odd   = g.reshape_(odd5,  vec![b as i64, s as i64, h as i64, half as i64]);
+    let even = g.reshape_(even5, vec![b as i64, s as i64, h as i64, half as i64]);
+    let odd = g.reshape_(odd5, vec![b as i64, s as i64, h as i64, half as i64]);
 
     let ec = g.mul(even, cos);
-    let os = g.mul(odd,  sin);
+    let os = g.mul(odd, sin);
     let out_even = g.sub(ec, os);
 
     let es = g.mul(even, sin);
-    let oc = g.mul(odd,  cos);
-    let out_odd  = g.add(es, oc);
+    let oc = g.mul(odd, cos);
+    let out_odd = g.add(es, oc);
 
     // Re-interleave: reshape each to [B,S,H,half,1], concat axis 4 → [B,S,H,half,2]
     let e5 = g.reshape_(out_even, vec![b as i64, s as i64, h as i64, half as i64, 1]);
-    let o5 = g.reshape_(out_odd,  vec![b as i64, s as i64, h as i64, half as i64, 1]);
+    let o5 = g.reshape_(out_odd, vec![b as i64, s as i64, h as i64, half as i64, 1]);
     let stacked = g.concat_(vec![e5, o5], 4);
     g.reshape_(stacked, vec![b as i64, s as i64, h as i64, d as i64])
+}
+
+/// Optional ZUNA1.1 QK-norm: the `(q_gamma, k_gamma)` params plus the shared
+/// zero beta. `None` reproduces the ZUNA1 path exactly.
+type QkNorm = Option<(NodeId, NodeId, NodeId)>;
+
+/// Apply the per-head RMSNorm to Q and K, matching upstream's ordering:
+/// after the `[B,S,H,Dh]` reshape and **before** RoPE.
+fn apply_qk_norm(g: &mut Graph, q4: NodeId, k4: NodeId, qk: QkNorm) -> (NodeId, NodeId) {
+    match qk {
+        Some((q_gamma, k_gamma, zero_beta)) => (
+            g.rms_norm(q4, q_gamma, zero_beta, QK_NORM_EPS),
+            g.rms_norm(k4, k_gamma, zero_beta, QK_NORM_EPS),
+        ),
+        None => (q4, k4),
+    }
 }
 
 /// Scaled dot-product attention with rotate-half RoPE pre-applied to Q/K.
@@ -149,69 +217,80 @@ fn rotate_half(
 fn self_attention(
     g: &mut Graph,
     x: NodeId,
-    wq: NodeId, wk: NodeId, wv: NodeId, wo: NodeId,
-    cos: NodeId, sin: NodeId,
-    b: usize, s: usize, _d: usize, nh: usize, dh: usize,
+    w: AttnWeights,
+    qk: QkNorm,
+    rope: RopeTables,
+    shape: HeadShape,
 ) -> NodeId {
+    let HeadShape { b, s, h: nh, d: dh } = shape;
     let h_total = nh * dh;
 
-    let q = g.mm(x, wq);
-    let k = g.mm(x, wk);
-    let v = g.mm(x, wv);
+    let q = g.mm(x, w.wq);
+    let k = g.mm(x, w.wk);
+    let v = g.mm(x, w.wv);
 
-    let q4 = g.reshape_(q, vec![b as i64, s as i64, nh as i64, dh as i64]);
-    let k4 = g.reshape_(k, vec![b as i64, s as i64, nh as i64, dh as i64]);
-    let v4 = g.reshape_(v, vec![b as i64, s as i64, nh as i64, dh as i64]);
+    let q4 = g.reshape_(q, shape.dims4());
+    let k4 = g.reshape_(k, shape.dims4());
+    let v4 = g.reshape_(v, shape.dims4());
 
-    let q_rot = rotate_half(g, q4, cos, sin, b, s, nh, dh);
-    let k_rot = rotate_half(g, k4, cos, sin, b, s, nh, dh);
+    let (q4, k4) = apply_qk_norm(g, q4, k4, qk);
+
+    let q_rot = rotate_half(g, q4, rope, shape);
+    let k_rot = rotate_half(g, k4, rope, shape);
 
     let attn = g.attention_kind(
-        q_rot, k_rot, v4,
-        nh, dh,
+        q_rot,
+        k_rot,
+        v4,
+        nh,
+        dh,
         rlx::ops::MaskKind::None,
         s4(b, s, nh, dh),
     );
     let attn_3 = g.reshape_(attn, vec![b as i64, s as i64, h_total as i64]);
-    g.mm(attn_3, wo)
+    g.mm(attn_3, w.wo)
 }
 
 /// Cross-attention: Q from `xq`, K/V from `xkv`. RoPE applied to both.
 fn cross_attention(
     g: &mut Graph,
-    xq: NodeId, xkv: NodeId,
-    wq: NodeId, wk: NodeId, wv: NodeId, wo: NodeId,
-    cos: NodeId, sin: NodeId,
-    b: usize, s: usize, _d: usize, nh: usize, dh: usize,
+    xq: NodeId,
+    xkv: NodeId,
+    w: AttnWeights,
+    qk: QkNorm,
+    rope: RopeTables,
+    shape: HeadShape,
 ) -> NodeId {
+    let HeadShape { b, s, h: nh, d: dh } = shape;
     let h_total = nh * dh;
-    let q = g.mm(xq,  wq);
-    let k = g.mm(xkv, wk);
-    let v = g.mm(xkv, wv);
+    let q = g.mm(xq, w.wq);
+    let k = g.mm(xkv, w.wk);
+    let v = g.mm(xkv, w.wv);
 
-    let q4 = g.reshape_(q, vec![b as i64, s as i64, nh as i64, dh as i64]);
-    let k4 = g.reshape_(k, vec![b as i64, s as i64, nh as i64, dh as i64]);
-    let v4 = g.reshape_(v, vec![b as i64, s as i64, nh as i64, dh as i64]);
+    let q4 = g.reshape_(q, shape.dims4());
+    let k4 = g.reshape_(k, shape.dims4());
+    let v4 = g.reshape_(v, shape.dims4());
 
-    let q_rot = rotate_half(g, q4, cos, sin, b, s, nh, dh);
-    let k_rot = rotate_half(g, k4, cos, sin, b, s, nh, dh);
+    let (q4, k4) = apply_qk_norm(g, q4, k4, qk);
+
+    let q_rot = rotate_half(g, q4, rope, shape);
+    let k_rot = rotate_half(g, k4, rope, shape);
 
     let attn = g.attention_kind(
-        q_rot, k_rot, v4,
-        nh, dh,
+        q_rot,
+        k_rot,
+        v4,
+        nh,
+        dh,
         rlx::ops::MaskKind::None,
         s4(b, s, nh, dh),
     );
     let attn_3 = g.reshape_(attn, vec![b as i64, s as i64, h_total as i64]);
-    g.mm(attn_3, wo)
+    g.mm(attn_3, w.wo)
 }
 
 /// SwiGLU: `w2(silu(w1(x)) * w3(x))`.
-fn swiglu_ffn(
-    g: &mut Graph,
-    x: NodeId,
-    w1: NodeId, w2: NodeId, w3: NodeId,
-) -> NodeId {
+fn swiglu_ffn(g: &mut Graph, x: NodeId, w1: NodeId, w2: NodeId, w3: NodeId) -> NodeId {
     let a = g.mm(x, w1);
     let act = g.silu(a);
     let c = g.mm(x, w3);
@@ -228,10 +307,12 @@ fn ada_rms_norm(
     g: &mut Graph,
     x: NodeId,
     c: NodeId,
-    proj_w: NodeId, proj_b: NodeId,
-    ones_dim: NodeId, zeros_dim: NodeId,
+    proj: (NodeId, NodeId),
+    unit_gamma_beta: (NodeId, NodeId),
     eps: f32,
 ) -> NodeId {
+    let (proj_w, proj_b) = proj;
+    let (ones_dim, zeros_dim) = unit_gamma_beta;
     // First normalise with unit gamma / zero beta — produces the same
     // result as the manual rsqrt formulation in the original Burn code.
     let normed = g.rms_norm(x, ones_dim, zeros_dim, eps);
@@ -242,42 +323,110 @@ fn ada_rms_norm(
     g.mul(normed, cm)
 }
 
+/// Declare the four projection matrices of one attention module.
+fn attn_weights(g: &mut Graph, prefix: &str, d: usize, nh: usize, dh: usize) -> AttnWeights {
+    AttnWeights {
+        wq: g.param(format!("{prefix}.wq.weight"), s2_(d, nh * dh)),
+        wk: g.param(format!("{prefix}.wk.weight"), s2_(d, nh * dh)),
+        wv: g.param(format!("{prefix}.wv.weight"), s2_(d, nh * dh)),
+        wo: g.param(format!("{prefix}.wo.weight"), s2_(nh * dh, d)),
+    }
+}
+
+/// Declare the `(q_gamma, k_gamma, zero_beta)` triple for one attention
+/// module, or `None` when the checkpoint predates QK-norm.
+fn qk_norm_params(g: &mut Graph, arch: ModelArch, prefix: &str, head_dim: usize) -> QkNorm {
+    if !arch.qk_norm {
+        return None;
+    }
+    let q = g.param(format!("{prefix}.q_norm.weight"), s1(head_dim));
+    let k = g.param(format!("{prefix}.k_norm.weight"), s1(head_dim));
+    let z = g.param(KEY_ZEROS_HEAD, s1(head_dim));
+    Some((q, k, z))
+}
+
+/// Sandwich ("post") norm on a sub-layer output, before the residual add.
+/// A no-op on checkpoints without `*_norm_post` weights.
+fn post_norm(
+    g: &mut Graph,
+    y: NodeId,
+    arch: ModelArch,
+    key: String,
+    dim: usize,
+    eps: f32,
+) -> NodeId {
+    if !arch.sandwich_norm {
+        return y;
+    }
+    let gamma = g.param(key, s1(dim));
+    let beta = g.param(KEY_ZEROS_DIM, s1(dim));
+    g.rms_norm(y, gamma, beta, eps)
+}
+
 // ── Encoder block ────────────────────────────────────────────────────────────
 
 fn encoder_block(
     g: &mut Graph,
     x: NodeId,
-    cos: NodeId, sin: NodeId,
+    rope: RopeTables,
     spec: &EncoderSpec,
     layer_idx: usize,
 ) -> NodeId {
-    let d  = spec.dim;
+    let d = spec.dim;
     let nh = spec.n_heads;
     let dh = spec.head_dim;
-    let p  = format!("encoder.layers.{layer_idx}");
+    let p = format!("encoder.layers.{layer_idx}");
 
     let an_g = g.param(format!("{p}.attention_norm.weight"), s1(d));
-    let zb   = g.param(KEY_ZEROS_DIM, s1(d));
-    let xn   = g.rms_norm(x, an_g, zb, spec.norm_eps);
+    let zb = g.param(KEY_ZEROS_DIM, s1(d));
+    let xn = g.rms_norm(x, an_g, zb, spec.norm_eps);
 
-    let wq = g.param(format!("{p}.attention.wq.weight"), s2_(d, nh * dh));
-    let wk = g.param(format!("{p}.attention.wk.weight"), s2_(d, nh * dh));
-    let wv = g.param(format!("{p}.attention.wv.weight"), s2_(d, nh * dh));
-    let wo = g.param(format!("{p}.attention.wo.weight"), s2_(nh * dh, d));
+    let w = attn_weights(g, &format!("{p}.attention"), d, nh, dh);
+    let qk = qk_norm_params(g, spec.arch, &format!("{p}.attention"), dh);
+    let shape = HeadShape {
+        b: spec.b,
+        s: spec.s2,
+        h: nh,
+        d: dh,
+    };
 
-    let attn = self_attention(g, xn, wq, wk, wv, wo, cos, sin,
-                              spec.b, spec.s2, d, nh, dh);
+    let attn = self_attention(g, xn, w, qk, rope, shape);
+    let attn = post_norm(
+        g,
+        attn,
+        spec.arch,
+        format!("{p}.attention_norm_post.weight"),
+        d,
+        spec.norm_eps,
+    );
     let x = g.add(x, attn);
 
     let fn_g = g.param(format!("{p}.ffn_norm.weight"), s1(d));
-    let zb2  = g.param(KEY_ZEROS_DIM, s1(d));
-    let hn   = g.rms_norm(x, fn_g, zb2, spec.norm_eps);
+    let zb2 = g.param(KEY_ZEROS_DIM, s1(d));
+    let hn = g.rms_norm(x, fn_g, zb2, spec.norm_eps);
 
-    let w1 = g.param(format!("{p}.feed_forward.w1.weight"), s2_(d, spec.hidden_dim));
-    let w2 = g.param(format!("{p}.feed_forward.w2.weight"), s2_(spec.hidden_dim, d));
-    let w3 = g.param(format!("{p}.feed_forward.w3.weight"), s2_(d, spec.hidden_dim));
+    let w1 = g.param(
+        format!("{p}.feed_forward.w1.weight"),
+        s2_(d, spec.hidden_dim),
+    );
+    let w2 = g.param(
+        format!("{p}.feed_forward.w2.weight"),
+        s2_(spec.hidden_dim, d),
+    );
+    let w3 = g.param(
+        format!("{p}.feed_forward.w3.weight"),
+        s2_(d, spec.hidden_dim),
+    );
 
     let ff = swiglu_ffn(g, hn, w1, w2, w3);
+    let ff = post_norm(
+        g,
+        ff,
+        spec.arch,
+        format!("{p}.ffn_norm_post.weight"),
+        d,
+        spec.norm_eps,
+    );
     g.add(x, ff)
 }
 
@@ -285,58 +434,100 @@ fn encoder_block(
 
 fn decoder_block(
     g: &mut Graph,
-    x: NodeId, y: NodeId, c: NodeId,
-    cos: NodeId, sin: NodeId,
+    x: NodeId,
+    y: NodeId,
+    c: NodeId,
+    rope: RopeTables,
     spec: &DecoderSpec,
     layer_idx: usize,
 ) -> NodeId {
-    let d  = spec.dim;
+    let d = spec.dim;
     let nh = spec.n_heads;
     let dh = spec.head_dim;
     let td = spec.t_dim;
-    let p  = format!("decoder.layers.{layer_idx}");
+    let p = format!("decoder.layers.{layer_idx}");
 
-    let ones  = g.param(KEY_ONES_DIM,  s1(d));
+    let ones = g.param(KEY_ONES_DIM, s1(d));
     let zeros = g.param(KEY_ZEROS_DIM, s1(d));
 
     // ── cross-attention ──
-    let xn_w = g.param(format!("{p}.cross_attention_x_norm.weight.weight"), s2_(td, d));
-    let xn_b = g.param(format!("{p}.cross_attention_x_norm.weight.bias"),   s1(d));
-    let yn_w = g.param(format!("{p}.cross_attention_y_norm.weight.weight"), s2_(td, d));
-    let yn_b = g.param(format!("{p}.cross_attention_y_norm.weight.bias"),   s1(d));
-    let x_norm = ada_rms_norm(g, x, c, xn_w, xn_b, ones, zeros, spec.norm_eps);
-    let y_norm = ada_rms_norm(g, y, c, yn_w, yn_b, ones, zeros, spec.norm_eps);
+    let xn_w = g.param(
+        format!("{p}.cross_attention_x_norm.weight.weight"),
+        s2_(td, d),
+    );
+    let xn_b = g.param(format!("{p}.cross_attention_x_norm.weight.bias"), s1(d));
+    let yn_w = g.param(
+        format!("{p}.cross_attention_y_norm.weight.weight"),
+        s2_(td, d),
+    );
+    let yn_b = g.param(format!("{p}.cross_attention_y_norm.weight.bias"), s1(d));
+    let unit = (ones, zeros);
+    let x_norm = ada_rms_norm(g, x, c, (xn_w, xn_b), unit, spec.norm_eps);
+    let y_norm = ada_rms_norm(g, y, c, (yn_w, yn_b), unit, spec.norm_eps);
 
-    let cwq = g.param(format!("{p}.cross_attention.wq.weight"), s2_(d, nh * dh));
-    let cwk = g.param(format!("{p}.cross_attention.wk.weight"), s2_(d, nh * dh));
-    let cwv = g.param(format!("{p}.cross_attention.wv.weight"), s2_(d, nh * dh));
-    let cwo = g.param(format!("{p}.cross_attention.wo.weight"), s2_(nh * dh, d));
-    let xa  = cross_attention(g, x_norm, y_norm, cwq, cwk, cwv, cwo, cos, sin,
-                              spec.b, spec.s, d, nh, dh);
+    let cw = attn_weights(g, &format!("{p}.cross_attention"), d, nh, dh);
+    let cqk = qk_norm_params(g, spec.arch, &format!("{p}.cross_attention"), dh);
+    let shape = HeadShape {
+        b: spec.b,
+        s: spec.s,
+        h: nh,
+        d: dh,
+    };
+    let xa = cross_attention(g, x_norm, y_norm, cw, cqk, rope, shape);
+    let xa = post_norm(
+        g,
+        xa,
+        spec.arch,
+        format!("{p}.cross_attention_norm_post.weight"),
+        d,
+        spec.norm_eps,
+    );
     let x = g.add(x, xa);
 
     // ── self-attention ──
     let an_w = g.param(format!("{p}.attention_norm.weight.weight"), s2_(td, d));
-    let an_b = g.param(format!("{p}.attention_norm.weight.bias"),   s1(d));
-    let xn   = ada_rms_norm(g, x, c, an_w, an_b, ones, zeros, spec.norm_eps);
+    let an_b = g.param(format!("{p}.attention_norm.weight.bias"), s1(d));
+    let xn = ada_rms_norm(g, x, c, (an_w, an_b), unit, spec.norm_eps);
 
-    let wq = g.param(format!("{p}.attention.wq.weight"), s2_(d, nh * dh));
-    let wk = g.param(format!("{p}.attention.wk.weight"), s2_(d, nh * dh));
-    let wv = g.param(format!("{p}.attention.wv.weight"), s2_(d, nh * dh));
-    let wo = g.param(format!("{p}.attention.wo.weight"), s2_(nh * dh, d));
-    let sa = self_attention(g, xn, wq, wk, wv, wo, cos, sin,
-                            spec.b, spec.s, d, nh, dh);
+    let w = attn_weights(g, &format!("{p}.attention"), d, nh, dh);
+    let qk = qk_norm_params(g, spec.arch, &format!("{p}.attention"), dh);
+    let sa = self_attention(g, xn, w, qk, rope, shape);
+    let sa = post_norm(
+        g,
+        sa,
+        spec.arch,
+        format!("{p}.attention_norm_post.weight"),
+        d,
+        spec.norm_eps,
+    );
     let h = g.add(x, sa);
 
     // ── feed-forward ──
     let fn_w = g.param(format!("{p}.ffn_norm.weight.weight"), s2_(td, d));
-    let fn_b = g.param(format!("{p}.ffn_norm.weight.bias"),   s1(d));
-    let hn   = ada_rms_norm(g, h, c, fn_w, fn_b, ones, zeros, spec.norm_eps);
+    let fn_b = g.param(format!("{p}.ffn_norm.weight.bias"), s1(d));
+    let hn = ada_rms_norm(g, h, c, (fn_w, fn_b), unit, spec.norm_eps);
 
-    let w1 = g.param(format!("{p}.feed_forward.w1.weight"), s2_(d, spec.hidden_dim));
-    let w2 = g.param(format!("{p}.feed_forward.w2.weight"), s2_(spec.hidden_dim, d));
-    let w3 = g.param(format!("{p}.feed_forward.w3.weight"), s2_(d, spec.hidden_dim));
+    let w1 = g.param(
+        format!("{p}.feed_forward.w1.weight"),
+        s2_(d, spec.hidden_dim),
+    );
+    let w2 = g.param(
+        format!("{p}.feed_forward.w2.weight"),
+        s2_(spec.hidden_dim, d),
+    );
+    let w3 = g.param(
+        format!("{p}.feed_forward.w3.weight"),
+        s2_(d, spec.hidden_dim),
+    );
     let ff = swiglu_ffn(g, hn, w1, w2, w3);
+    let ff = post_norm(
+        g,
+        ff,
+        spec.arch,
+        format!("{p}.ffn_norm_post.weight"),
+        d,
+        spec.norm_eps,
+    );
     g.add(h, ff)
 }
 
@@ -346,9 +537,9 @@ fn decoder_block(
 ///
 /// Inputs (set via `compiled.run`):
 /// * `x` — `[B, S2, input_dim]` (already register-interleaved on the CPU
-///   side; see [`super::data::preinterleave`]).
+///   side; see [`super::rope_helpers::preinterleave`]).
 /// * `freqs_cos`, `freqs_sin` — `[1, S2, 1, head_dim/2]` (precomputed from
-///   `tok_idx`; see [`super::data::precompute_rope`]).
+///   `tok_idx`; see [`super::rope_helpers::precompute_rope`]).
 ///
 /// Output: `[B, S, output_dim]`.
 pub fn build_encoder_graph(spec: &EncoderSpec) -> Graph {
@@ -356,40 +547,41 @@ pub fn build_encoder_graph(spec: &EncoderSpec) -> Graph {
 
     let id = spec.input_dim;
     let od = spec.output_dim;
-    let d  = spec.dim;
+    let d = spec.dim;
     let dh = spec.head_dim;
     let df = spec.downsample_factor;
-    let b  = spec.b;
-    let s  = spec.s;
+    let b = spec.b;
+    let s = spec.s;
     let s2 = spec.s2;
 
-    let x   = g.input("x",         s3(b, s2, id));
+    let x = g.input("x", s3(b, s2, id));
     let cos = g.input("freqs_cos", s4(1, s2, 1, dh / 2));
     let sin = g.input("freqs_sin", s4(1, s2, 1, dh / 2));
 
     // Embedding: Linear(input_dim → dim) with bias.
     let emb_w = g.param("encoder.tok_embeddings.weight", s2_(id, d));
-    let emb_b = g.param("encoder.tok_embeddings.bias",   s1(d));
-    let h0    = g.mm(x, emb_w);
+    let emb_b = g.param("encoder.tok_embeddings.bias", s1(d));
+    let h0 = g.mm(x, emb_w);
     let mut h = g.add(h0, emb_b);
 
+    let rope = RopeTables { cos, sin };
     for i in 0..spec.n_layers {
-        h = encoder_block(&mut g, h, cos, sin, spec, i);
+        h = encoder_block(&mut g, h, rope, spec, i);
     }
 
     // Final RMSNorm — note: encoder uses RmsNorm with single `gamma` only.
     let n_g = g.param("encoder.norm.weight", s1(d));
-    let zb  = g.param(KEY_ZEROS_DIM, s1(d));
-    let h   = g.rms_norm(h, n_g, zb, spec.norm_eps);
+    let zb = g.param(KEY_ZEROS_DIM, s1(d));
+    let h = g.rms_norm(h, n_g, zb, spec.norm_eps);
 
     // De-interleave: keep only the register positions. [B,S2,d] →
     // [B,S,df+1,d] → narrow axis 2 from 0 len 1 → [B,S,1,d] → [B,S,d].
     let h5 = g.reshape_(h, vec![b as i64, s as i64, (df + 1) as i64, d as i64]);
     let regs5 = g.narrow_(h5, 2, 0, 1);
-    let regs  = g.reshape_(regs5, vec![b as i64, s as i64, d as i64]);
+    let regs = g.reshape_(regs5, vec![b as i64, s as i64, d as i64]);
 
     let out_w = g.param("encoder.output.weight", s2_(d, od));
-    let out   = g.mm(regs, out_w);
+    let out = g.mm(regs, out_w);
 
     g.set_outputs(vec![out]);
     g
@@ -407,65 +599,65 @@ pub fn build_encoder_graph(spec: &EncoderSpec) -> Graph {
 pub fn build_decoder_graph(spec: &DecoderSpec) -> Graph {
     let mut g = Graph::new("zuna_decoder");
 
-    let b  = spec.b;
-    let s  = spec.s;
-    let d  = spec.dim;
+    let b = spec.b;
+    let s = spec.s;
+    let d = spec.dim;
     let id = spec.input_dim;
     let ed = spec.encoder_dim;
     let td = spec.t_dim;
     let dh = spec.head_dim;
 
-    let z         = g.input("z",         s3(b, s, id));
-    let enc_out   = g.input("enc_out",   s3(b, s, ed));
-    let time_t    = g.input("time_t",    s3(b, 1, 1));
-    let cos       = g.input("freqs_cos", s4(1, s, 1, dh / 2));
-    let sin       = g.input("freqs_sin", s4(1, s, 1, dh / 2));
+    let z = g.input("z", s3(b, s, id));
+    let enc_out = g.input("enc_out", s3(b, s, ed));
+    let time_t = g.input("time_t", s3(b, 1, 1));
+    let cos = g.input("freqs_cos", s4(1, s, 1, dh / 2));
+    let sin = g.input("freqs_sin", s4(1, s, 1, dh / 2));
 
     // Token embeddings: z → h [B, S, dim]
     let te_w = g.param("decoder.tok_embeddings.weight", s2_(id, d));
-    let te_b = g.param("decoder.tok_embeddings.bias",   s1(d));
-    let h0   = g.mm(z, te_w);
-    let h    = g.add(h0, te_b);
+    let te_b = g.param("decoder.tok_embeddings.bias", s1(d));
+    let h0 = g.mm(z, te_w);
+    let h = g.add(h0, te_b);
 
     // FourierConditioner: weight stored on disk as [t_dim/2, 1]; we
     // pre-transpose at load time to [1, t_dim/2] so we can mm directly.
-    let tw      = g.param("decoder.t_embedder.weight", s2_(1, td / 2));
-    let two_pi  = g.param(KEY_TWO_PI, s1(1));
-    let f       = g.mm(time_t, tw);
+    let tw = g.param("decoder.t_embedder.weight", s2_(1, td / 2));
+    let two_pi = g.param(KEY_TWO_PI, s1(1));
+    let f = g.mm(time_t, tw);
     let f_scaled = g.mul(f, two_pi);
     let s_cos = s3(b, 1, td / 2);
     let cos_f = g.activation(Activation::Cos, f_scaled, s_cos.clone());
     let sin_f = g.activation(Activation::Sin, f_scaled, s_cos);
-    let cat   = g.concat_(vec![cos_f, sin_f], 2);
+    let cat = g.concat_(vec![cos_f, sin_f], 2);
 
     let tp_w = g.param("decoder.t_embedder.proj.weight", s2_(td, td));
-    let tp_b = g.param("decoder.t_embedder.proj.bias",   s1(td));
-    let tm   = g.mm(cat, tp_w);
-    let c    = g.add(tm, tp_b);
+    let tp_b = g.param("decoder.t_embedder.proj.bias", s1(td));
+    let tm = g.mm(cat, tp_w);
+    let c = g.add(tm, tp_b);
 
     // encoder_proj: enc_out → y [B,S,dim]
     let ep_w = g.param("decoder.encoder_proj.weight", s2_(ed, d));
-    let ep_b = g.param("decoder.encoder_proj.bias",   s1(d));
-    let ym   = g.mm(enc_out, ep_w);
-    let y    = g.add(ym, ep_b);
+    let ep_b = g.param("decoder.encoder_proj.bias", s1(d));
+    let ym = g.mm(enc_out, ep_w);
+    let y = g.add(ym, ep_b);
 
     // Decoder layers
+    let rope = RopeTables { cos, sin };
     let mut h = h;
     for i in 0..spec.n_layers {
-        h = decoder_block(&mut g, h, y, c, cos, sin, spec, i);
+        h = decoder_block(&mut g, h, y, c, rope, spec, i);
     }
 
     // Final AdaRMSNorm + output linear.
-    let ones  = g.param(KEY_ONES_DIM,  s1(d));
+    let ones = g.param(KEY_ONES_DIM, s1(d));
     let zeros = g.param(KEY_ZEROS_DIM, s1(d));
     let fn_w = g.param("decoder.norm.weight.weight", s2_(td, d));
-    let fn_b = g.param("decoder.norm.weight.bias",   s1(d));
-    let h    = ada_rms_norm(&mut g, h, c, fn_w, fn_b, ones, zeros, spec.norm_eps);
+    let fn_b = g.param("decoder.norm.weight.bias", s1(d));
+    let h = ada_rms_norm(&mut g, h, c, (fn_w, fn_b), (ones, zeros), spec.norm_eps);
 
     let out_w = g.param("decoder.output.weight", s2_(d, id));
-    let out   = g.mm(h, out_w);
+    let out = g.mm(h, out_w);
 
     g.set_outputs(vec![out]);
     g
 }
-

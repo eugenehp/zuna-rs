@@ -15,20 +15,20 @@ use plotters::prelude::*;
 
 pub const DEFAULT_REPO: &str = "Zyphra/ZUNA";
 pub const WEIGHTS_FILE: &str = "model-00001-of-00001.safetensors";
-pub const CONFIG_FILE:  &str = "config.json";
+pub const CONFIG_FILE: &str = "config.json";
 
 /// Tab10 palette (matches matplotlib defaults).
 const PALETTE: &[RGBColor] = &[
-    RGBColor( 31, 119, 180),   // blue
-    RGBColor(255, 127,  14),   // orange
-    RGBColor( 44, 160,  44),   // green
-    RGBColor(214,  39,  40),   // red
-    RGBColor(148, 103, 189),   // purple
-    RGBColor(140,  86,  75),   // brown
-    RGBColor(227, 119, 194),   // pink
-    RGBColor(127, 127, 127),   // grey
-    RGBColor(188, 189,  34),   // yellow-green
-    RGBColor( 23, 190, 207),   // cyan
+    RGBColor(31, 119, 180),  // blue
+    RGBColor(255, 127, 14),  // orange
+    RGBColor(44, 160, 44),   // green
+    RGBColor(214, 39, 40),   // red
+    RGBColor(148, 103, 189), // purple
+    RGBColor(140, 86, 75),   // brown
+    RGBColor(227, 119, 194), // pink
+    RGBColor(127, 127, 127), // grey
+    RGBColor(188, 189, 34),  // yellow-green
+    RGBColor(23, 190, 207),  // cyan
 ];
 
 // ── HuggingFace weight resolution ─────────────────────────────────────────────
@@ -40,10 +40,10 @@ const PALETTE: &[RGBColor] = &[
 ///   2. `hf-download` feature compiled in → download/cache via `hf-hub`.
 ///   3. Scan `~/.cache/huggingface/hub/` for an existing snapshot.
 pub fn resolve_weights(
-    repo_id:          &str,
+    repo_id: &str,
     weights_override: Option<&str>,
-    config_override:  Option<&str>,
-    cache_dir:        Option<&Path>,
+    config_override: Option<&str>,
+    cache_dir: Option<&Path>,
 ) -> anyhow::Result<(PathBuf, PathBuf)> {
     match (weights_override, config_override) {
         (Some(w), Some(c)) => return Ok((w.into(), c.into())),
@@ -57,15 +57,14 @@ pub fn resolve_weights(
     #[cfg(feature = "hf-download")]
     {
         match hf_hub_resolve(repo_id, cache_dir) {
-            Ok(p)  => return Ok(p),
+            Ok(p) => return Ok(p),
             Err(e) => eprintln!("⚠  hf-hub: {e}  — falling back to cache scan"),
         }
     }
 
     // ── Scan local HF disk cache ──────────────────────────────────────────────
-    match scan_hf_cache(repo_id, cache_dir) {
-        Ok(paths) => return Ok(paths),
-        Err(_)    => {}
+    if let Ok(paths) = scan_hf_cache(repo_id, cache_dir) {
+        return Ok(paths);
     }
 
     // ── Last resort: download via Python huggingface_hub ─────────────────────
@@ -81,13 +80,17 @@ pub fn resolve_weights(
 fn hf_hub_resolve(repo_id: &str, cache_dir: Option<&Path>) -> anyhow::Result<(PathBuf, PathBuf)> {
     use hf_hub::api::sync::ApiBuilder;
     let mut b = ApiBuilder::new().with_progress(true);
-    if let Some(d) = cache_dir { b = b.with_cache_dir(d.to_path_buf()); }
+    if let Some(d) = cache_dir {
+        b = b.with_cache_dir(d.to_path_buf());
+    }
     let repo = b.build()?.model(repo_id.to_string());
     Ok((repo.get(WEIGHTS_FILE)?, repo.get(CONFIG_FILE)?))
 }
 
 fn scan_hf_cache(repo_id: &str, cache_dir: Option<&Path>) -> anyhow::Result<(PathBuf, PathBuf)> {
-    let base = cache_dir.map(PathBuf::from).unwrap_or_else(default_hf_cache);
+    let base = cache_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(default_hf_cache);
     // HF uses "--" as path separator: "Zyphra/ZUNA" → "models--Zyphra--ZUNA"
     let snapshots = base
         .join(format!("models--{}", repo_id.replace('/', "--")))
@@ -108,10 +111,12 @@ fn scan_hf_cache(repo_id: &str, cache_dir: Option<&Path>) -> anyhow::Result<(Pat
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
         .collect();
     dirs.sort_by_key(|e| {
-        e.metadata().and_then(|m| m.modified())
+        e.metadata()
+            .and_then(|m| m.modified())
             .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
     });
-    let snap = dirs.last()
+    let snap = dirs
+        .last()
         .ok_or_else(|| anyhow::anyhow!("no snapshot dirs under {snapshots:?}"))?
         .path();
 
@@ -141,7 +146,9 @@ fn find_python() -> Option<String> {
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false);
-        if ok { return Some(candidate.to_string()); }
+        if ok {
+            return Some(candidate.to_string());
+        }
     }
     None
 }
@@ -152,10 +159,12 @@ fn find_python() -> Option<String> {
 /// Uses `.output()` (not `.status()`) so that conda/pip noise printed to stdout
 /// by the interpreter on macOS does not pollute parseable output.
 fn download_via_python(repo_id: &str) -> anyhow::Result<()> {
-    let python = find_python().ok_or_else(|| anyhow::anyhow!(
-        "no Python interpreter found (tried: $ZUNA_PYTHON, python3, python)\n\
+    let python = find_python().ok_or_else(|| {
+        anyhow::anyhow!(
+            "no Python interpreter found (tried: $ZUNA_PYTHON, python3, python)\n\
          Install huggingface_hub: pip install huggingface_hub"
-    ))?;
+        )
+    })?;
 
     let code = format!(
         "from huggingface_hub import snapshot_download; \
@@ -187,32 +196,42 @@ fn download_via_python(repo_id: &str) -> anyhow::Result<()> {
 
 fn default_hf_cache() -> PathBuf {
     // Respect $HF_HOME first, then $XDG_CACHE_HOME, then ~/.cache
-    if let Ok(v) = std::env::var("HF_HOME") { return PathBuf::from(v).join("hub"); }
+    if let Ok(v) = std::env::var("HF_HOME") {
+        return PathBuf::from(v).join("hub");
+    }
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".cache").join("huggingface").join("hub")
+    PathBuf::from(home)
+        .join(".cache")
+        .join("huggingface")
+        .join("hub")
 }
 
 pub fn ensure_figures_dir(dir: &Path) -> anyhow::Result<()> {
-    std::fs::create_dir_all(dir)
-        .with_context(|| format!("creating figures dir {}", dir.display()))
+    std::fs::create_dir_all(dir).with_context(|| format!("creating figures dir {}", dir.display()))
 }
 
 // ── Step-by-step timer ────────────────────────────────────────────────────────
 
 pub struct StepTimer {
-    run_start:  Instant,
+    run_start: Instant,
     step_start: Instant,
-    step:       usize,
-    total:      usize,
+    step: usize,
+    total: usize,
     pub verbose: bool,
 }
 
 impl StepTimer {
     pub fn new(total: usize, verbose: bool) -> Self {
         let now = Instant::now();
-        Self { run_start: now, step_start: now, step: 0, total, verbose }
+        Self {
+            run_start: now,
+            step_start: now,
+            step: 0,
+            total,
+            verbose,
+        }
     }
 
     /// Mark the beginning of a step and print its header.
@@ -220,8 +239,12 @@ impl StepTimer {
         self.step += 1;
         self.step_start = Instant::now();
         if self.verbose {
-            println!("\n[{:>6.2}s] ▶ [{}/{}] {desc}",
-                self.run_start.elapsed().as_secs_f64(), self.step, self.total);
+            println!(
+                "\n[{:>6.2}s] ▶ [{}/{}] {desc}",
+                self.run_start.elapsed().as_secs_f64(),
+                self.step,
+                self.total
+            );
         } else {
             print!("[{}/{}] {desc} … ", self.step, self.total);
             let _ = std::io::stdout().flush();
@@ -232,8 +255,10 @@ impl StepTimer {
     pub fn done(&self, detail: &str) -> f64 {
         let ms = self.step_start.elapsed().as_secs_f64() * 1000.0;
         if self.verbose {
-            println!("[{:>6.2}s] ✓  {ms:.0} ms  {detail}",
-                self.run_start.elapsed().as_secs_f64());
+            println!(
+                "[{:>6.2}s] ✓  {ms:.0} ms  {detail}",
+                self.run_start.elapsed().as_secs_f64()
+            );
         } else {
             println!("{ms:.0} ms  {detail}");
         }
@@ -260,19 +285,15 @@ impl StepTimer {
 
 /// Horizontal bar chart showing how long each step took.
 /// `items`: `&[("Step label", milliseconds)]`
-pub fn save_timing_chart(
-    path:  &Path,
-    title: &str,
-    items: &[(&str, f64)],
-) -> anyhow::Result<()> {
-    const W:      u32 = 900;
-    const ROW_H:  i32 = 40;
-    const GAP:    i32 = 14;
-    const TOP:    i32 = 64;   // space for title
-    const LEFT:   i32 = 170;  // label column
-    const RPAD:   i32 = 130;  // value text column
-    let bar_area  = W as i32 - LEFT - RPAD;
-    let h         = (TOP + items.len() as i32 * (ROW_H + GAP) + 30) as u32;
+pub fn save_timing_chart(path: &Path, title: &str, items: &[(&str, f64)]) -> anyhow::Result<()> {
+    const W: u32 = 900;
+    const ROW_H: i32 = 40;
+    const GAP: i32 = 14;
+    const TOP: i32 = 64; // space for title
+    const LEFT: i32 = 170; // label column
+    const RPAD: i32 = 130; // value text column
+    let bar_area = W as i32 - LEFT - RPAD;
+    let h = (TOP + items.len() as i32 * (ROW_H + GAP) + 30) as u32;
 
     let root = BitMapBackend::new(path, (W, h)).into_drawing_area();
     root.fill(&WHITE)?;
@@ -286,9 +307,9 @@ pub fn save_timing_chart(
     let max_ms = items.iter().map(|(_, v)| *v).fold(1.0f64, f64::max);
 
     for (i, (label, ms)) in items.iter().enumerate() {
-        let y    = TOP + i as i32 * (ROW_H + GAP);
+        let y = TOP + i as i32 * (ROW_H + GAP);
         let fill = ((ms / max_ms) * bar_area as f64).max(2.0) as i32;
-        let col  = PALETTE[i % PALETTE.len()];
+        let col = PALETTE[i % PALETTE.len()];
 
         // Label (approximate right-align by shifting left by string width)
         root.draw(&Text::new(
@@ -321,19 +342,22 @@ pub fn save_timing_chart(
 /// Line chart of reconstructed EEG signal.
 /// `signal`: `[n_channels][n_timesteps]`.  At most 8 channels are shown.
 pub fn save_waveform_chart(
-    path:     &Path,
-    title:    &str,
-    signal:   &[Vec<f32>],
+    path: &Path,
+    title: &str,
+    signal: &[Vec<f32>],
     ch_names: &[String],
-    sfreq:    f32,
+    sfreq: f32,
 ) -> anyhow::Result<()> {
     let n_ch = signal.len().min(8);
-    let n_t  = signal[0].len();
-    let dur  = n_t as f64 / sfreq as f64;
+    let n_t = signal[0].len();
+    let dur = n_t as f64 / sfreq as f64;
 
-    let (y_lo, y_hi) = signal[..n_ch].iter()
+    let (y_lo, y_hi) = signal[..n_ch]
+        .iter()
         .flat_map(|ch| ch.iter().copied())
-        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| {
+            (lo.min(v), hi.max(v))
+        });
     let pad = (y_hi - y_lo).max(0.1) * 0.06;
 
     let root = BitMapBackend::new(path, (1100, 500)).into_drawing_area();
@@ -346,25 +370,31 @@ pub fn save_waveform_chart(
         .y_label_area_size(64i32)
         .build_cartesian_2d(0.0f64..dur, (y_lo - pad) as f64..(y_hi + pad) as f64)?;
 
-    chart.configure_mesh()
+    chart
+        .configure_mesh()
         .x_desc("Time (s)")
         .y_desc("Amplitude")
-        .x_labels(10).y_labels(6)
+        .x_labels(10)
+        .y_labels(6)
         .draw()?;
 
     for (ch, samples) in signal[..n_ch].iter().enumerate() {
-        let col   = PALETTE[ch % PALETTE.len()];
+        let col = PALETTE[ch % PALETTE.len()];
         let label = ch_names.get(ch).map(|s| s.as_str()).unwrap_or("?");
-        chart.draw_series(LineSeries::new(
-            samples.iter().enumerate()
-                .map(|(t, &v)| (t as f64 / sfreq as f64, v as f64)),
-            col.stroke_width(1),
-        ))?
-        .label(label)
-        .legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 16, y)], col.stroke_width(2)));
+        chart
+            .draw_series(LineSeries::new(
+                samples
+                    .iter()
+                    .enumerate()
+                    .map(|(t, &v)| (t as f64 / sfreq as f64, v as f64)),
+                col.stroke_width(1),
+            ))?
+            .label(label)
+            .legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 16, y)], col.stroke_width(2)));
     }
 
-    chart.configure_series_labels()
+    chart
+        .configure_series_labels()
         .background_style(WHITE.mix(0.85).filled())
         .border_style(BLACK)
         .label_font(("sans-serif", 11u32).into_font())
@@ -379,17 +409,20 @@ pub fn save_waveform_chart(
 
 /// Grouped bar chart: mean / ±std / min-max per epoch.
 pub fn save_epoch_stats_chart(
-    path:  &Path,
+    path: &Path,
     title: &str,
     means: &[f64],
-    stds:  &[f64],
-    mins:  &[f64],
-    maxs:  &[f64],
+    stds: &[f64],
+    mins: &[f64],
+    maxs: &[f64],
 ) -> anyhow::Result<()> {
-    let n     = means.len();
-    let y_abs = maxs.iter().copied().fold(0.0f64, f64::max)
+    let n = means.len();
+    let y_abs = maxs
+        .iter()
+        .copied()
+        .fold(0.0f64, f64::max)
         .max(mins.iter().copied().fold(0.0f64, |a, v| a.max(v.abs())));
-    let y_max =  y_abs * 1.1;
+    let y_max = y_abs * 1.1;
     let y_min = -y_abs * 1.1;
 
     let root = BitMapBackend::new(path, (800, 450)).into_drawing_area();
@@ -402,38 +435,63 @@ pub fn save_epoch_stats_chart(
         .y_label_area_size(64i32)
         .build_cartesian_2d(0.0f64..(n as f64 + 0.2), y_min..y_max)?;
 
-    chart.configure_mesh()
+    chart
+        .configure_mesh()
         .x_desc("Epoch")
         .y_desc("Value")
-        .x_labels(n.max(1)).y_labels(7)
+        .x_labels(n.max(1))
+        .y_labels(7)
         .draw()?;
 
     // Min-max range (narrow bar)
-    chart.draw_series(mins.iter().zip(maxs.iter()).enumerate().map(|(i, (&mn, &mx))| {
-        let xc = i as f64 + 0.5;
-        Rectangle::new([(xc - 0.08, mn), (xc + 0.08, mx)],
-            RGBColor(180, 180, 220).mix(0.7).filled())
-    }))?;
+    chart.draw_series(
+        mins.iter()
+            .zip(maxs.iter())
+            .enumerate()
+            .map(|(i, (&mn, &mx))| {
+                let xc = i as f64 + 0.5;
+                Rectangle::new(
+                    [(xc - 0.08, mn), (xc + 0.08, mx)],
+                    RGBColor(180, 180, 220).mix(0.7).filled(),
+                )
+            }),
+    )?;
 
     // ±std bar
-    chart.draw_series(means.iter().zip(stds.iter()).enumerate().map(|(i, (&m, &s))| {
-        let xc = i as f64 + 0.5;
-        Rectangle::new([(xc - 0.22, m - s), (xc + 0.22, m + s)],
-            PALETTE[1].mix(0.55).filled())
-    }))?
-    .label("±std")
-    .legend(|(x, y)| Rectangle::new([(x, y - 4), (x + 12, y + 4)], PALETTE[1].mix(0.55).filled()));
+    chart
+        .draw_series(
+            means
+                .iter()
+                .zip(stds.iter())
+                .enumerate()
+                .map(|(i, (&m, &s))| {
+                    let xc = i as f64 + 0.5;
+                    Rectangle::new(
+                        [(xc - 0.22, m - s), (xc + 0.22, m + s)],
+                        PALETTE[1].mix(0.55).filled(),
+                    )
+                }),
+        )?
+        .label("±std")
+        .legend(|(x, y)| {
+            Rectangle::new([(x, y - 4), (x + 12, y + 4)], PALETTE[1].mix(0.55).filled())
+        });
 
     // Mean line marker
     let tick = (y_max - y_min) * 0.005;
-    chart.draw_series(means.iter().enumerate().map(|(i, &m)| {
-        let xc = i as f64 + 0.5;
-        Rectangle::new([(xc - 0.30, m - tick), (xc + 0.30, m + tick)], PALETTE[0].filled())
-    }))?
-    .label("mean")
-    .legend(|(x, y)| Rectangle::new([(x, y - 4), (x + 12, y + 4)], PALETTE[0].filled()));
+    chart
+        .draw_series(means.iter().enumerate().map(|(i, &m)| {
+            let xc = i as f64 + 0.5;
+            Rectangle::new(
+                [(xc - 0.30, m - tick), (xc + 0.30, m + tick)],
+                PALETTE[0].filled(),
+            )
+        }))?
+        .label("mean")
+        .legend(|(x, y)| Rectangle::new([(x, y - 4), (x + 12, y + 4)], PALETTE[0].filled()));
 
-    chart.configure_series_labels()
+    chart
+        .configure_series_labels()
         .background_style(WHITE.mix(0.85).filled())
         .border_style(BLACK)
         .label_font(("sans-serif", 11u32).into_font())
@@ -448,8 +506,8 @@ pub fn save_epoch_stats_chart(
 
 /// Histogram of all embedding values with an N(0,1) reference curve.
 pub fn save_distribution_chart(
-    path:   &Path,
-    title:  &str,
+    path: &Path,
+    title: &str,
     values: &[f32],
     n_bins: usize,
 ) -> anyhow::Result<()> {
@@ -474,34 +532,39 @@ pub fn save_distribution_chart(
         .y_label_area_size(64i32)
         .build_cartesian_2d(lo..hi, 0.0f64..(max_c * 1.12))?;
 
-    chart.configure_mesh()
+    chart
+        .configure_mesh()
         .x_desc("Embedding value")
         .y_desc("Count")
-        .x_labels(9).y_labels(6)
+        .x_labels(9)
+        .y_labels(6)
         .draw()?;
 
     // Histogram bins
-    chart.draw_series(
-        counts.iter().enumerate().map(|(i, &c)| {
-            let x0 = lo + i as f64 * bw;
-            Rectangle::new([(x0, 0.0), (x0 + bw, c as f64)], PALETTE[0].mix(0.72).filled())
-        })
-    )?;
+    chart.draw_series(counts.iter().enumerate().map(|(i, &c)| {
+        let x0 = lo + i as f64 * bw;
+        Rectangle::new(
+            [(x0, 0.0), (x0 + bw, c as f64)],
+            PALETTE[0].mix(0.72).filled(),
+        )
+    }))?;
 
     // N(0,1) reference curve scaled to histogram area
     let scale = values.len() as f64 * bw;
-    chart.draw_series(LineSeries::new(
-        (0..=300).map(|k| {
-            let x = lo + (hi - lo) * k as f64 / 300.0;
-            let pdf = (-0.5 * x * x).exp() / (2.0 * std::f64::consts::PI).sqrt();
-            (x, scale * pdf)
-        }),
-        PALETTE[3].stroke_width(2),
-    ))?
-    .label("N(0,1) ideal")
-    .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 16, y)], PALETTE[3].stroke_width(2)));
+    chart
+        .draw_series(LineSeries::new(
+            (0..=300).map(|k| {
+                let x = lo + (hi - lo) * k as f64 / 300.0;
+                let pdf = (-0.5 * x * x).exp() / (2.0 * std::f64::consts::PI).sqrt();
+                (x, scale * pdf)
+            }),
+            PALETTE[3].stroke_width(2),
+        ))?
+        .label("N(0,1) ideal")
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 16, y)], PALETTE[3].stroke_width(2)));
 
-    chart.configure_series_labels()
+    chart
+        .configure_series_labels()
         .background_style(WHITE.mix(0.85).filled())
         .border_style(BLACK)
         .label_font(("sans-serif", 11u32).into_font())
@@ -517,15 +580,18 @@ pub fn save_distribution_chart(
 /// Bar chart of per-dimension mean (across all tokens) with ±std bands.
 /// Ideal for verifying MMD regularlisation → means ≈ 0, stds ≈ 1.
 pub fn save_dim_stats_chart(
-    path:      &Path,
-    title:     &str,
+    path: &Path,
+    title: &str,
     dim_means: &[f64],
-    dim_stds:  &[f64],
+    dim_stds: &[f64],
 ) -> anyhow::Result<()> {
-    let n     = dim_means.len();
-    let y_abs = dim_means.iter().zip(dim_stds.iter())
+    let n = dim_means.len();
+    let y_abs = dim_means
+        .iter()
+        .zip(dim_stds.iter())
         .map(|(m, s)| m.abs() + s)
-        .fold(1.0f64, f64::max) * 1.15;
+        .fold(1.0f64, f64::max)
+        * 1.15;
 
     let root = BitMapBackend::new(path, (1100, 450)).into_drawing_area();
     root.fill(&WHITE)?;
@@ -537,41 +603,54 @@ pub fn save_dim_stats_chart(
         .y_label_area_size(64i32)
         .build_cartesian_2d(0.0f64..(n as f64), -y_abs..y_abs)?;
 
-    chart.configure_mesh()
+    chart
+        .configure_mesh()
         .x_desc("Latent dimension")
         .y_desc("Mean across tokens")
-        .x_labels(n.min(16)).y_labels(7)
+        .x_labels(n.min(16))
+        .y_labels(7)
         .draw()?;
 
     // ±std shaded band
-    chart.draw_series(
-        dim_means.iter().zip(dim_stds.iter()).enumerate().map(|(i, (&m, &s))| {
-            Rectangle::new(
-                [(i as f64 + 0.05, m - s), (i as f64 + 0.95, m + s)],
-                PALETTE[0].mix(0.22).filled(),
-            )
-        })
-    )?
-    .label("±std (tokens)")
-    .legend(|(x, y)| Rectangle::new([(x, y - 5), (x + 12, y + 5)], PALETTE[0].mix(0.3).filled()));
+    chart
+        .draw_series(
+            dim_means
+                .iter()
+                .zip(dim_stds.iter())
+                .enumerate()
+                .map(|(i, (&m, &s))| {
+                    Rectangle::new(
+                        [(i as f64 + 0.05, m - s), (i as f64 + 0.95, m + s)],
+                        PALETTE[0].mix(0.22).filled(),
+                    )
+                }),
+        )?
+        .label("±std (tokens)")
+        .legend(|(x, y)| {
+            Rectangle::new([(x, y - 5), (x + 12, y + 5)], PALETTE[0].mix(0.3).filled())
+        });
 
     // Mean bars (blue = positive, red = negative)
-    chart.draw_series(
-        dim_means.iter().enumerate().map(|(i, &m)| {
+    chart
+        .draw_series(dim_means.iter().enumerate().map(|(i, &m)| {
             let col = if m >= 0.0 { PALETTE[0] } else { PALETTE[3] };
             let (y0, y1) = if m >= 0.0 { (0.0, m) } else { (m, 0.0) };
-            Rectangle::new([(i as f64 + 0.2, y0), (i as f64 + 0.8, y1)], col.mix(0.85).filled())
-        })
-    )?
-    .label("dim mean")
-    .legend(|(x, y)| Rectangle::new([(x, y - 5), (x + 12, y + 5)], PALETTE[0].filled()));
+            Rectangle::new(
+                [(i as f64 + 0.2, y0), (i as f64 + 0.8, y1)],
+                col.mix(0.85).filled(),
+            )
+        }))?
+        .label("dim mean")
+        .legend(|(x, y)| Rectangle::new([(x, y - 5), (x + 12, y + 5)], PALETTE[0].filled()));
 
     // Zero reference line
-    chart.draw_series(std::iter::once(
-        PathElement::new(vec![(0.0, 0.0), (n as f64, 0.0)], BLACK.stroke_width(1)),
-    ))?;
+    chart.draw_series(std::iter::once(PathElement::new(
+        vec![(0.0, 0.0), (n as f64, 0.0)],
+        BLACK.stroke_width(1),
+    )))?;
 
-    chart.configure_series_labels()
+    chart
+        .configure_series_labels()
         .background_style(WHITE.mix(0.85).filled())
         .border_style(BLACK)
         .label_font(("sans-serif", 11u32).into_font())

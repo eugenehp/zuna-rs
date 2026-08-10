@@ -1,22 +1,22 @@
-/// ZUNA backend × channel-count benchmark.
-///
-/// Sweeps the encoder forward pass across every compiled-in backend and a range
-/// of channel counts.  Produces a CSV-style table on stdout and (optionally) a
-/// heatmap chart.
-///
-/// # Usage
-///
-/// ```sh
-/// # Build with all backends you want to compare:
-/// cargo build --release --features ndarray,mlx,wgpu --example backend_bench
-///
-/// # Run (will test every compiled-in backend):
-/// cargo run --example backend_bench --release --features ndarray,mlx,wgpu
-///
-/// # Custom channel counts and warmup:
-/// cargo run --example backend_bench --release --features ndarray,mlx -- \
-///     --channels 4,8,12,19,32 --runs 3 --warmup 1
-/// ```
+//! ZUNA backend × channel-count benchmark.
+//!
+//! Sweeps the encoder forward pass across every compiled-in backend and a range
+//! of channel counts.  Produces a CSV-style table on stdout and (optionally) a
+//! heatmap chart.
+//!
+//! # Usage
+//!
+//! ```sh
+//! # Build with all backends you want to compare:
+//! cargo build --release --features ndarray,mlx,wgpu --example backend_bench
+//!
+//! # Run (will test every compiled-in backend):
+//! cargo run --example backend_bench --release --features ndarray,mlx,wgpu
+//!
+//! # Custom channel counts and warmup:
+//! cargo run --example backend_bench --release --features ndarray,mlx -- \
+//!     --channels 4,8,12,19,32 --runs 3 --warmup 1
+//! ```
 
 #[path = "common/mod.rs"]
 mod common;
@@ -27,14 +27,14 @@ use std::time::Instant;
 use burn::prelude::*;
 use burn::tensor::Distribution;
 use clap::Parser;
-use zuna_rs::{ZunaEncoder, data::InputBatch, config::DataConfig};
+use zuna_rs::{config::DataConfig, data::InputBatch, ZunaEncoder};
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 #[derive(Parser, Debug)]
 #[command(
     name = "backend_bench",
-    about = "ZUNA — sweep encoder across backends × channel counts",
+    about = "ZUNA — sweep encoder across backends × channel counts"
 )]
 struct Args {
     /// Comma-separated list of channel counts to benchmark.
@@ -81,22 +81,16 @@ struct Args {
 ///
 /// Uses random Normal(0,1) data and evenly-spaced channel positions,
 /// mimicking a real EEG epoch at 256 Hz × 5 s = 1280 samples.
-fn make_synthetic_batch<B: Backend>(
-    n_ch: usize,
-    device: &B::Device,
-) -> InputBatch<B> {
+fn make_synthetic_batch<B: Backend>(n_ch: usize, device: &B::Device) -> InputBatch<B> {
     let cfg = DataConfig::default();
     let tf = cfg.num_fine_time_pts; // 32
-    let epoch_samples = 1280usize;  // 5s × 256Hz
-    let tc = epoch_samples / tf;    // 40
+    let epoch_samples = 1280usize; // 5s × 256Hz
+    let tc = epoch_samples / tf; // 40
     let n_tokens = n_ch * tc;
 
     // Random encoder input [1, n_tokens, 32]
-    let encoder_input = Tensor::<B, 3>::random(
-        [1, n_tokens, tf],
-        Distribution::Normal(0.0, 1.0),
-        device,
-    );
+    let encoder_input =
+        Tensor::<B, 3>::random([1, n_tokens, tf], Distribution::Normal(0.0, 1.0), device);
 
     // Build tok_idx [n_tokens, 4]: (x_bin, y_bin, z_bin, t_coarse)
     let mut idx_data = vec![0i64; n_tokens * 4];
@@ -106,25 +100,24 @@ fn make_synthetic_batch<B: Backend>(
         let z_bin = 25i64;
         for t in 0..tc {
             let row = ch * tc + t;
-            idx_data[row * 4]     = x_bin;
+            idx_data[row * 4] = x_bin;
             idx_data[row * 4 + 1] = y_bin;
             idx_data[row * 4 + 2] = z_bin;
             idx_data[row * 4 + 3] = t as i64;
         }
     }
-    let tok_idx = Tensor::<B, 2, Int>::from_data(
-        TensorData::new(idx_data, [n_tokens, 4]),
-        device,
-    );
+    let tok_idx = Tensor::<B, 2, Int>::from_data(TensorData::new(idx_data, [n_tokens, 4]), device);
 
     // Dummy channel positions [n_ch, 3]
-    let chan_pos = Tensor::<B, 2>::random(
-        [n_ch, 3],
-        Distribution::Normal(0.0, 0.05),
-        device,
-    );
+    let chan_pos = Tensor::<B, 2>::random([n_ch, 3], Distribution::Normal(0.0, 0.05), device);
 
-    InputBatch { encoder_input, tok_idx, chan_pos, n_channels: n_ch, tc }
+    InputBatch {
+        encoder_input,
+        tok_idx,
+        chan_pos,
+        n_channels: n_ch,
+        tc,
+    }
 }
 
 // ── Benchmark runner ─────────────────────────────────────────────────────────
@@ -208,9 +201,13 @@ fn run_all(
     #[cfg(feature = "ndarray")]
     {
         use burn::backend::{ndarray::NdArrayDevice, NdArray};
-        let name = if cfg!(feature = "blas-accelerate") { "NdArray+Accelerate" }
-                   else if cfg!(feature = "openblas-system") { "NdArray+OpenBLAS" }
-                   else { "NdArray+Rayon" };
+        let name = if cfg!(feature = "blas-accelerate") {
+            "NdArray+Accelerate"
+        } else if cfg!(feature = "openblas-system") {
+            "NdArray+OpenBLAS"
+        } else {
+            "NdArray+Rayon"
+        };
         eprint!("  {name:<22} ");
         match ZunaEncoder::<NdArray>::load(config_path, weights_path, NdArrayDevice::Cpu) {
             Ok((enc, _)) => {
@@ -238,7 +235,11 @@ fn run_all(
         type B = burn::backend::wgpu::Wgpu<half::f16, i32, u32>;
         let name = "wgpu f16";
         eprint!("  {name:<22} ");
-        match ZunaEncoder::<B>::load(config_path, weights_path, burn::backend::wgpu::WgpuDevice::DefaultDevice) {
+        match ZunaEncoder::<B>::load(
+            config_path,
+            weights_path,
+            burn::backend::wgpu::WgpuDevice::DefaultDevice,
+        ) {
             Ok((enc, _)) => {
                 all_results.extend(bench_backend(name, &enc, channel_counts, n_warmup, n_runs));
             }
@@ -261,7 +262,7 @@ fn run_all(
 
     #[cfg(any(feature = "mlx-f16", feature = "mlx"))]
     {
-        use burn_mlx::{MlxHalf, MlxDevice};
+        use burn_mlx::{MlxDevice, MlxHalf};
         let name = "MLX f16";
         eprint!("  {name:<22} ");
         match ZunaEncoder::<MlxHalf>::load(config_path, weights_path, MlxDevice::Gpu) {
@@ -313,12 +314,10 @@ fn generate_chart(
         .margin(15)
         .x_label_area_size(40)
         .y_label_area_size(70)
-        .build_cartesian_2d(
-            0f64..(total_groups as f64),
-            0f64..max_ms,
-        )?;
+        .build_cartesian_2d(0f64..(total_groups as f64), 0f64..max_ms)?;
 
-    chart.configure_mesh()
+    chart
+        .configure_mesh()
         .disable_x_mesh()
         .y_desc("Encode time (ms, 1 epoch, best of N)")
         .x_desc("Channels")
@@ -334,48 +333,49 @@ fn generate_chart(
         .draw()?;
 
     let colors = [
-        RGBColor(108, 117, 125),  // grey (NdArray)
-        RGBColor(13, 110, 253),   // blue (wgpu f32)
-        RGBColor(10, 88, 202),    // dark blue (wgpu f16)
-        RGBColor(25, 135, 84),    // green (MLX f32)
-        RGBColor(15, 81, 50),     // dark green (MLX f16)
+        RGBColor(108, 117, 125), // grey (NdArray)
+        RGBColor(13, 110, 253),  // blue (wgpu f32)
+        RGBColor(10, 88, 202),   // dark blue (wgpu f16)
+        RGBColor(25, 135, 84),   // green (MLX f32)
+        RGBColor(15, 81, 50),    // dark green (MLX f16)
     ];
 
     for (bi, backend) in backends.iter().enumerate() {
         let color = colors[bi % colors.len()];
-        let backend_results: Vec<&BenchResult> = results.iter()
-            .filter(|r| &r.backend == backend)
+        let backend_results: Vec<&BenchResult> =
+            results.iter().filter(|r| &r.backend == backend).collect();
+
+        let data: Vec<(f64, f64)> = backend_results
+            .iter()
+            .enumerate()
+            .map(|(ci, r)| {
+                let x = ci as f64 + (bi as f64 - (n_backends as f64 - 1.0) / 2.0) * bar_width;
+                (x, r.min_ms())
+            })
             .collect();
 
-        let data: Vec<(f64, f64)> = backend_results.iter().enumerate().map(|(ci, r)| {
-            let x = ci as f64 + (bi as f64 - (n_backends as f64 - 1.0) / 2.0) * bar_width;
-            (x, r.min_ms())
-        }).collect();
-
-        chart.draw_series(
-            data.iter().map(|&(x, y)| {
+        chart
+            .draw_series(data.iter().map(|&(x, y)| {
                 let x0 = x - bar_width * 0.4;
                 let x1 = x + bar_width * 0.4;
                 Rectangle::new([(x0, 0.0), (x1, y)], color.filled())
-            })
-        )?
-        .label(backend.as_str())
-        .legend(move |(x, y)| Rectangle::new([(x, y - 5), (x + 15, y + 5)], color.filled()));
+            }))?
+            .label(backend.as_str())
+            .legend(move |(x, y)| Rectangle::new([(x, y - 5), (x + 15, y + 5)], color.filled()));
 
         // Value labels
         for &(x, y) in &data {
-            let label = if y < 1000.0 {
-                format!("{:.0}", y)
-            } else {
-                format!("{:.0}", y)
-            };
-            chart.draw_series(std::iter::once(
-                Text::new(label, (x, y + max_ms * 0.02), ("sans-serif", 9).into_font())
-            ))?;
+            let label = format!("{y:.0}");
+            chart.draw_series(std::iter::once(Text::new(
+                label,
+                (x, y + max_ms * 0.02),
+                ("sans-serif", 9).into_font(),
+            )))?;
         }
     }
 
-    chart.configure_series_labels()
+    chart
+        .configure_series_labels()
         .position(SeriesLabelPosition::UpperLeft)
         .border_style(BLACK.mix(0.3))
         .background_style(WHITE.mix(0.8))
@@ -391,7 +391,8 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let _n = zuna_rs::init_threads(args.threads);
 
-    let channel_counts: Vec<usize> = args.channels
+    let channel_counts: Vec<usize> = args
+        .channels
         .split(',')
         .map(|s| s.trim().parse::<usize>().expect("invalid channel count"))
         .collect();
@@ -422,14 +423,23 @@ fn main() -> anyhow::Result<()> {
 
     // Print results table
     println!();
-    println!("{:<22} {:>4} {:>6} {:>10} {:>10} {:>10} {:>10}",
-        "Backend", "Ch", "Tok", "Min(ms)", "Mean(ms)", "Std(ms)", "ms/epoch");
+    println!(
+        "{:<22} {:>4} {:>6} {:>10} {:>10} {:>10} {:>10}",
+        "Backend", "Ch", "Tok", "Min(ms)", "Mean(ms)", "Std(ms)", "ms/epoch"
+    );
     println!("{}", "─".repeat(78));
 
     for r in &results {
-        println!("{:<22} {:>4} {:>6} {:>10.1} {:>10.1} {:>10.1} {:>10.1}",
-            r.backend, r.n_channels, r.n_tokens,
-            r.min_ms(), r.mean_ms(), r.std_ms(), r.per_epoch_ms());
+        println!(
+            "{:<22} {:>4} {:>6} {:>10.1} {:>10.1} {:>10.1} {:>10.1}",
+            r.backend,
+            r.n_channels,
+            r.n_tokens,
+            r.min_ms(),
+            r.mean_ms(),
+            r.std_ms(),
+            r.per_epoch_ms()
+        );
     }
 
     // Print speedup table (vs slowest backend for each channel count)
@@ -438,24 +448,30 @@ fn main() -> anyhow::Result<()> {
     let backends: Vec<String> = {
         let mut seen = Vec::new();
         for r in &results {
-            if !seen.contains(&r.backend) { seen.push(r.backend.clone()); }
+            if !seen.contains(&r.backend) {
+                seen.push(r.backend.clone());
+            }
         }
         seen
     };
 
     // Header
     print!("{:<22}", "Backend");
-    for &ch in &channel_counts { print!(" {:>6}ch", ch); }
+    for &ch in &channel_counts {
+        print!(" {:>6}ch", ch);
+    }
     println!();
     println!("{}", "─".repeat(22 + channel_counts.len() * 8));
 
     for backend in &backends {
         print!("{:<22}", backend);
         for &ch in &channel_counts {
-            let this = results.iter()
+            let this = results
+                .iter()
                 .find(|r| r.backend == *backend && r.n_channels == ch)
                 .map(|r| r.min_ms());
-            let baseline = results.iter()
+            let baseline = results
+                .iter()
                 .find(|r| r.n_channels == ch)
                 .map(|r| r.min_ms());
             match (this, baseline) {
@@ -481,9 +497,15 @@ fn main() -> anyhow::Result<()> {
     println!("\n── CSV ─────────────────────────────────────────────────────────");
     println!("backend,channels,tokens,min_ms,mean_ms,std_ms");
     for r in &results {
-        println!("{},{},{},{:.1},{:.1},{:.1}",
-            r.backend, r.n_channels, r.n_tokens,
-            r.min_ms(), r.mean_ms(), r.std_ms());
+        println!(
+            "{},{},{},{:.1},{:.1},{:.1}",
+            r.backend,
+            r.n_channels,
+            r.n_tokens,
+            r.min_ms(),
+            r.mean_ms(),
+            r.std_ms()
+        );
     }
 
     Ok(())

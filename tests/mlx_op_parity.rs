@@ -36,17 +36,23 @@ fn arange(n: usize, scale: f32) -> Vec<f32> {
 
 fn rand_like(n: usize, seed: u64) -> Vec<f32> {
     let mut s = if seed == 0 { 0xCAFEF00DD15EA5E5 } else { seed };
-    (0..n).map(|_| {
-        s ^= s << 13; s ^= s >> 7; s ^= s << 17;
-        (((s >> 11) as f64 / (1u64 << 53) as f64) as f32 - 0.5) * 2.0
-    }).collect()
+    (0..n)
+        .map(|_| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (((s >> 11) as f64 / (1u64 << 53) as f64) as f32 - 0.5) * 2.0
+        })
+        .collect()
 }
 
 fn cosine(a: &[f32], b: &[f32]) -> f64 {
     let (mut d, mut na, mut nb) = (0.0f64, 0.0f64, 0.0f64);
     for (&x, &y) in a.iter().zip(b.iter()) {
         let (x, y) = (x as f64, y as f64);
-        d += x * y; na += x * x; nb += y * y;
+        d += x * y;
+        na += x * x;
+        nb += y * y;
     }
     d / (na.sqrt() * nb.sqrt())
 }
@@ -56,7 +62,9 @@ fn assert_parity(label: &str, cpu: &[f32], mlx: &[f32]) {
     let mut max_abs = 0.0f32;
     for (a, b) in cpu.iter().zip(mlx.iter()) {
         let d = (a - b).abs();
-        if d > max_abs { max_abs = d; }
+        if d > max_abs {
+            max_abs = d;
+        }
     }
     let cos = cosine(cpu, mlx);
     assert!(
@@ -65,25 +73,31 @@ fn assert_parity(label: &str, cpu: &[f32], mlx: &[f32]) {
     );
 }
 
-fn run_both<F>(build: F, inputs: &[(&str, &[f32])], params: &[(&str, Vec<f32>)])
-    -> Option<(Vec<f32>, Vec<f32>)>
+fn run_both<F>(
+    build: F,
+    inputs: &[(&str, &[f32])],
+    params: &[(&str, Vec<f32>)],
+) -> Option<(Vec<f32>, Vec<f32>)>
 where
     F: Fn() -> Graph,
 {
     let run_on = |dev: rlx::Device| -> Vec<f32> {
         let mut compiled = rlx::Session::new(dev).compile(build());
-        for (n, v) in params { compiled.set_param(n, v); }
+        for (n, v) in params {
+            compiled.set_param(n, v);
+        }
         compiled.run(inputs).into_iter().next().unwrap()
     };
     let cpu = run_on(rlx::Device::Cpu);
-    let mlx = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_on(rlx::Device::Mlx))) {
-        Ok(v) => v,
-        Err(_) => {
-            eprintln!("[skip] MLX backend not available in this build");
-            return None;
-        }
-    };
-    Some((cpu, mlx)))
+    let mlx =
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_on(rlx::Device::Mlx))) {
+            Ok(v) => v,
+            Err(_) => {
+                eprintln!("[skip] MLX backend not available in this build");
+                return None;
+            }
+        };
+    Some((cpu, mlx))
 }
 
 #[test]
@@ -99,7 +113,9 @@ fn matmul_3d() {
         g.set_outputs(vec![y]);
         g
     };
-    let Some((cpu, mlx)) = run_both(build, &[("x", &x)], &[("w", w)]) else { return };
+    let Some((cpu, mlx)) = run_both(build, &[("x", &x)], &[("w", w)]) else {
+        return;
+    };
     assert_parity("matmul [1,8,32] @ [32,32]", &cpu, &mlx);
 }
 
@@ -111,15 +127,18 @@ fn rms_norm_3d() {
         let mut g = Graph::new("rn");
         let xi = g.input("x", Shape::new(&[b, s, d], DType::F32));
         let gamma = g.param("gamma", Shape::new(&[d], DType::F32));
-        let beta  = g.param("beta",  Shape::new(&[d], DType::F32));
+        let beta = g.param("beta", Shape::new(&[d], DType::F32));
         let y = g.rms_norm(xi, gamma, beta, 1e-5);
         g.set_outputs(vec![y]);
         g
     };
     let Some((cpu, mlx)) = run_both(
-        build, &[("x", &x)],
+        build,
+        &[("x", &x)],
         &[("gamma", vec![1.0; d]), ("beta", vec![0.0; d])],
-    ) else { return };
+    ) else {
+        return;
+    };
     assert_parity("rms_norm [1,8,32]", &cpu, &mlx);
 }
 
@@ -136,13 +155,21 @@ fn attention_rank4_bshd() {
         let qi = g.input("q", Shape::new(&[b, s, nh, dh], DType::F32));
         let ki = g.input("k", Shape::new(&[b, s, nh, dh], DType::F32));
         let vi = g.input("v", Shape::new(&[b, s, nh, dh], DType::F32));
-        let y = g.attention_kind_(qi, ki, vi, nh, dh, MaskKind::None);
+        let y = g.attention_kind(
+            qi,
+            ki,
+            vi,
+            nh,
+            dh,
+            MaskKind::None,
+            Shape::new(&[b, s, nh, dh], DType::F32),
+        );
         g.set_outputs(vec![y]);
         g
     };
-    let Some((cpu, mlx)) = run_both(
-        build, &[("q", &q), ("k", &k), ("v", &v)], &[],
-    ) else { return };
+    let Some((cpu, mlx)) = run_both(build, &[("q", &q), ("k", &k), ("v", &v)], &[]) else {
+        return;
+    };
     assert_parity("attention [B,S,H,D]", &cpu, &mlx);
 }
 
@@ -158,13 +185,21 @@ fn attention_rank4_bhsd() {
         let qi = g.input("q", Shape::new(&[b, nh, s, dh], DType::F32));
         let ki = g.input("k", Shape::new(&[b, nh, s, dh], DType::F32));
         let vi = g.input("v", Shape::new(&[b, nh, s, dh], DType::F32));
-        let y = g.attention_kind_(qi, ki, vi, nh, dh, MaskKind::None);
+        let y = g.attention_kind(
+            qi,
+            ki,
+            vi,
+            nh,
+            dh,
+            MaskKind::None,
+            Shape::new(&[b, nh, s, dh], DType::F32),
+        );
         g.set_outputs(vec![y]);
         g
     };
-    let Some((cpu, mlx)) = run_both(
-        build, &[("q", &q), ("k", &k), ("v", &v)], &[],
-    ) else { return };
+    let Some((cpu, mlx)) = run_both(build, &[("q", &q), ("k", &k), ("v", &v)], &[]) else {
+        return;
+    };
     assert_parity("attention [B,H,S,D]", &cpu, &mlx);
 }
 
@@ -183,7 +218,9 @@ fn narrow_5d_axis4_idx0() {
         g.set_outputs(vec![y]);
         g
     };
-    let Some((cpu, mlx)) = run_both(build, &[("x", &x)], &[]) else { return };
+    let Some((cpu, mlx)) = run_both(build, &[("x", &x)], &[]) else {
+        return;
+    };
     assert_parity("narrow axis=4 start=0 on 5-D", &cpu, &mlx);
 }
 
@@ -199,7 +236,9 @@ fn narrow_5d_axis4_idx1() {
         g.set_outputs(vec![y]);
         g
     };
-    let Some((cpu, mlx)) = run_both(build, &[("x", &x)], &[]) else { return };
+    let Some((cpu, mlx)) = run_both(build, &[("x", &x)], &[]) else {
+        return;
+    };
     assert_parity("narrow axis=4 start=1 on 5-D", &cpu, &mlx);
 }
 
@@ -219,7 +258,9 @@ fn concat_5d_axis4() {
         g.set_outputs(vec![y]);
         g
     };
-    let Some((cpu, mlx)) = run_both(build, &[("a", &a), ("b", &bv)], &[]) else { return };
+    let Some((cpu, mlx)) = run_both(build, &[("a", &a), ("b", &bv)], &[]) else {
+        return;
+    };
     assert_parity("concat axis=4 on 5-D", &cpu, &mlx);
 }
 
@@ -235,32 +276,32 @@ fn rotate_half_pattern() {
     let sin = arange(s * half, 0.0002);
     let build = || {
         let mut g = Graph::new("rot");
-        let xi  = g.input("x",   Shape::new(&[b, s, h, d], DType::F32));
-        let ci  = g.input("cos", Shape::new(&[1, s, 1, half], DType::F32));
-        let si  = g.input("sin", Shape::new(&[1, s, 1, half], DType::F32));
+        let xi = g.input("x", Shape::new(&[b, s, h, d], DType::F32));
+        let ci = g.input("cos", Shape::new(&[1, s, 1, half], DType::F32));
+        let si = g.input("sin", Shape::new(&[1, s, 1, half], DType::F32));
 
         let pairs = g.reshape_(xi, vec![b as i64, s as i64, h as i64, half as i64, 2]);
         let even5 = g.narrow_(pairs, 4, 0, 1);
-        let odd5  = g.narrow_(pairs, 4, 1, 1);
+        let odd5 = g.narrow_(pairs, 4, 1, 1);
         let even = g.reshape_(even5, vec![b as i64, s as i64, h as i64, half as i64]);
-        let odd  = g.reshape_(odd5,  vec![b as i64, s as i64, h as i64, half as i64]);
+        let odd = g.reshape_(odd5, vec![b as i64, s as i64, h as i64, half as i64]);
 
         let ec = g.mul(even, ci);
-        let os = g.mul(odd,  si);
+        let os = g.mul(odd, si);
         let out_even = g.sub(ec, os);
         let es = g.mul(even, si);
-        let oc = g.mul(odd,  ci);
-        let out_odd  = g.add(es, oc);
+        let oc = g.mul(odd, ci);
+        let out_odd = g.add(es, oc);
 
         let e5 = g.reshape_(out_even, vec![b as i64, s as i64, h as i64, half as i64, 1]);
-        let o5 = g.reshape_(out_odd,  vec![b as i64, s as i64, h as i64, half as i64, 1]);
+        let o5 = g.reshape_(out_odd, vec![b as i64, s as i64, h as i64, half as i64, 1]);
         let stacked = g.concat_(vec![e5, o5], 4);
         let y = g.reshape_(stacked, vec![b as i64, s as i64, h as i64, d as i64]);
         g.set_outputs(vec![y]);
         g
     };
-    let Some((cpu, mlx)) = run_both(
-        build, &[("x", &x), ("cos", &cos), ("sin", &sin)], &[],
-    ) else { return };
+    let Some((cpu, mlx)) = run_both(build, &[("x", &x), ("cos", &cos), ("sin", &sin)], &[]) else {
+        return;
+    };
     assert_parity("rotate_half [B,S,H,2*half]", &cpu, &mlx);
 }
